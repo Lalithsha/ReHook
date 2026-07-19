@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Relational Database (Alpine Linux)
+  postgres:
+    image: postgres:16-alpine
+    container_name: rehook-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rehook
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Redis Key-Value & Queue Broker (Alpine Linux)
+  redis:
+    image: redis:7-alpine
+    container_name: rehook-redis
+    restart: always
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. ReHook API Gateway Server (Alpine Bun)
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: rehook-api
+    restart: always
+    ports:
+      - '3001:3001'
+    environment:
+      PORT: '3001'
+      X_API_KEY: 'super_secret_rehook_key_123'
+      POSTGRES_URL: 'postgres://postgres:postgres@postgres:5432/rehook'
+      REDIS_URL: 'redis://redis:6379'
+      RETRY_QUEUE_NAME: 'rehook-delivery-queue'
+      DLQ_QUEUE_NAME: 'rehook-dlq-queue'
+      NODE_ENV: 'production'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: bun src/server.ts
+
+  # 4. ReHook BullMQ Delivery Worker Engine (Alpine Bun)
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: rehook-worker
+    restart: always
+    environment:
+      PORT: '3001'
+      X_API_KEY: 'super_secret_rehook_key_123'
+      POSTGRES_URL: 'postgres://postgres:postgres@postgres:5432/rehook'
+      REDIS_URL: 'redis://redis:6379'
+      RETRY_QUEUE_NAME: 'rehook-delivery-queue'
+      DLQ_QUEUE_NAME: 'rehook-dlq-queue'
+      NODE_ENV: 'production'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: bun src/workers/init.ts
+
+  # 5. Next.js Operator Dashboard UI (Alpine Bun)
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: rehook-dashboard
+    restart: always
+    ports:
+      - '3000:3000'
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
