@@ -10,6 +10,8 @@
     "db:generate": "prisma generate --schema=prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
     "db:push": "prisma db push --schema=prisma/schema.prisma",
+    "mock:receiver": "bun src/scripts/mockReceiver.ts",
+    "benchmark": "bun src/scripts/benchmark.ts",
     "test": "bun test"
   },
   "dependencies": {
@@ -28,9 +30,11 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.9",
+    "@types/supertest": "^7.2.1",
     "@types/swagger-ui-express": "^4.1.8",
     "bun-types": "latest",
     "prisma": "^6.19.3",
+    "supertest": "^7.2.2",
     "typescript": "^5.8.2"
   }
 }

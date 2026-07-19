@@ -9,6 +9,8 @@
     "db:generate": "bun --cwd apps/api db:generate",
     "db:migrate": "bun --cwd apps/api db:migrate",
     "db:push": "bun --cwd apps/api db:push",
+    "mock:receiver": "bun --cwd apps/api mock:receiver",
+    "benchmark": "bun --cwd apps/api benchmark",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types"
