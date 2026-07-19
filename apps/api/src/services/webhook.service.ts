@@ -26,6 +26,7 @@ export class WebhookService {
         status: WebhookStatus.pending,
         maxAttempts,
         attemptCount: 0,
+        replayCount: 0,
         nextAttemptAt: new Date(),
       },
     });
@@ -46,7 +47,43 @@ export class WebhookService {
   static async getWebhookById(id: string): Promise<Webhook | null> {
     return prisma.webhook.findUnique({
       where: { id },
+      include: {
+        attempts: {
+          orderBy: { attemptNumber: 'asc' },
+        },
+      },
     });
+  }
+
+  /**
+   * Gets all webhooks with optional status filter & pagination (for Dashboard)
+   */
+  static async getWebhooks(limit = 50, offset = 0, status?: WebhookStatus) {
+    const where = status ? { status } : {};
+    const [total, webhooks] = await Promise.all([
+      prisma.webhook.count({ where }),
+      prisma.webhook.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          attempts: {
+            orderBy: { attemptNumber: 'desc' },
+            take: 1,
+          },
+        },
+      }),
+    ]);
+
+    return { total, limit, offset, webhooks };
+  }
+
+  /**
+   * Gets dead-lettered webhooks with pagination
+   */
+  static async getDeadLetterWebhooks(limit = 20, offset = 0) {
+    return this.getWebhooks(limit, offset, WebhookStatus.dead);
   }
 
   /**
@@ -62,18 +99,19 @@ export class WebhookService {
   /**
    * Replays a Dead-Lettered webhook manually
    */
-  static async replayDlqWebhook(webhookId: string): Promise<boolean> {
+  static async replayDlqWebhook(webhookId: string): Promise<Webhook | null> {
     const webhook = await prisma.webhook.findUnique({ where: { id: webhookId } });
     if (!webhook) {
-      return false;
+      return null;
     }
 
-    // Reset attempts and status
-    await prisma.webhook.update({
+    // Reset attempts, increment replayCount, and update status to pending
+    const updatedWebhook = await prisma.webhook.update({
       where: { id: webhookId },
       data: {
         status: WebhookStatus.pending,
         attemptCount: 0,
+        replayCount: { increment: 1 },
         nextAttemptAt: new Date(),
       },
     });
@@ -86,6 +124,6 @@ export class WebhookService {
       { jobId: `webhook-replay-${webhookId}-${Date.now()}` }
     );
 
-    return true;
+    return updatedWebhook;
   }
 }

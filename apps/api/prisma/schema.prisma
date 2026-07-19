@@ -56,6 +56,7 @@ model Webhook {
   status        WebhookStatus  @default(pending)
   maxAttempts   Int            @default(5) @map("max_attempts")
   attemptCount  Int            @default(0) @map("attempt_count")
+  replayCount   Int            @default(0) @map("replay_count")
   nextAttemptAt DateTime?      @map("next_attempt_at") @db.Timestamptz
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz

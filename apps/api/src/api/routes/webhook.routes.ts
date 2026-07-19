@@ -13,8 +13,13 @@ router.get('/metrics', WebhookController.getMetrics);
 
 // Authenticated & Rate limited Webhook endpoints
 router.post('/webhooks', authenticateApiKey, rateLimiter, WebhookController.registerWebhook);
+router.get('/webhooks', authenticateApiKey, WebhookController.getWebhooks);
 router.get('/webhooks/:id/status', authenticateApiKey, WebhookController.getWebhookStatus);
 router.get('/webhooks/:id/attempts', authenticateApiKey, WebhookController.getWebhookAttempts);
+
+// DLQ Operability endpoints
+router.get('/dlq', authenticateApiKey, WebhookController.getDlqWebhooks);
+router.get('/dlq/:id', authenticateApiKey, WebhookController.getDlqWebhookById);
 router.post('/dlq/:id/replay', authenticateApiKey, WebhookController.replayDlqWebhook);
 
 // Authenticated Endpoint Secret Management & Key Rotation
