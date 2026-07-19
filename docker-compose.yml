@@ -31,7 +31,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 3. ReHook API Gateway Server (Alpine Bun)
+  # 3. ReHook API Gateway Server (Alpine Bun - Live Hot Reload)
   api:
     build:
       context: .
@@ -46,15 +46,17 @@ services:
       REDIS_URL: 'redis://redis:6379'
       RETRY_QUEUE_NAME: 'rehook-delivery-queue'
       DLQ_QUEUE_NAME: 'rehook-dlq-queue'
-      NODE_ENV: 'production'
+      NODE_ENV: 'development'
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bun src/server.ts
+    command: bun --watch src/server.ts
 
-  # 4. ReHook BullMQ Delivery Worker Engine (Alpine Bun)
+  # 4. ReHook BullMQ Delivery Worker Engine (Alpine Bun - Live Hot Reload)
   worker:
     build:
       context: .
@@ -67,15 +69,17 @@ services:
       REDIS_URL: 'redis://redis:6379'
       RETRY_QUEUE_NAME: 'rehook-delivery-queue'
       DLQ_QUEUE_NAME: 'rehook-dlq-queue'
-      NODE_ENV: 'production'
+      NODE_ENV: 'development'
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bun src/workers/init.ts
+    command: bun --watch src/workers/init.ts
 
-  # 5. Next.js Operator Dashboard UI (Alpine Bun)
+  # 5. Next.js Operator Dashboard UI (Alpine Bun - Live Hot Reload)
   web:
     build:
       context: .
@@ -83,8 +87,11 @@ services:
     restart: always
     ports:
       - '3000:3000'
+    volumes:
+      - ./apps/web/app:/app/apps/web/app
     depends_on:
       - api
+    command: bun run dev
 
 volumes:
   postgres_data:
