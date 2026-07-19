@@ -11,7 +11,8 @@
 
 A production-grade, highly available, fault-tolerant **Webhook Delivery Platform**. ReHook handles asynchronous event ingestion, automatic retries with **exponential randomized jitter backoff**, **distributed Redis circuit breaking**, **zero-downtime secret rotation**, rate limiting, and **dead-letter queue (DLQ)** management.
 
-> 📖 **Production Master Blueprint & Architecture:** See [PRODUCTION_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/PRODUCTION_PLAN.md) for detailed phase-wise design, trade-offs, and system benchmarking.  
+> 📘 **Master System Handbook:** See [REHOOK_SYSTEM_HANDBOOK.md](file:///Users/lalithsharma/My-Projects/ReHook/REHOOK_SYSTEM_HANDBOOK.md) for the single-source-of-truth technical reference, complete phase-by-phase implementation breakdown, testing strategy, and architecture specs.  
+> 📖 **Production Master Blueprint:** See [PRODUCTION_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/PRODUCTION_PLAN.md) for execution roadmap and trade-off analysis.  
 > ♊ **AI Assistant Handbook:** See [gemini.md](file:///Users/lalithsharma/My-Projects/ReHook/gemini.md) for developer context.
 
 ---
