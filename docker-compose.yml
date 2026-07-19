@@ -31,7 +31,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 3. ReHook API Gateway Server (Alpine Bun - Live Hot Reload)
+  # 3. ReHook API Gateway Server (Alpine Bun - Auto DB Sync & Hot Reload)
   api:
     build:
       context: .
@@ -54,7 +54,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bun --watch src/server.ts
+    command: sh -c "bun db:push && bun --watch src/server.ts"
 
   # 4. ReHook BullMQ Delivery Worker Engine (Alpine Bun - Live Hot Reload)
   worker:
