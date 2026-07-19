@@ -1,8 +1,10 @@
-# Turborepo starter
+# 🔁 ReHook - Enterprise Webhook Delivery Platform
 
-This Turborepo starter is maintained by the Turborepo core team.
+A production-ready, high-throughput queue-based delivery engine for **reliable webhook delivery with retry logic**, Redis circuit breaking, dual-secret key rotation, and dead letter queue (DLQ) management.
 
-## Using this example
+> 📖 **Production Master Blueprint & Architecture:** See [PRODUCTION_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/PRODUCTION_PLAN.md) for the phase-wise execution strategy, system trade-off analysis, rate limiting, and interview preparation guides.
+
+---
 
 Run the following command:
 

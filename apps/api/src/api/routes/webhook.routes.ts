@@ -1,0 +1,17 @@
+import { Router } from 'express';
+import { WebhookController } from '../controllers/webhook.controller.js';
+import { authenticateApiKey } from '../../middlewares/auth.middleware.js';
+import { createRateLimiter } from '../../middlewares/rateLimiter.middleware.js';
+
+export const router: Router = Router();
+
+const rateLimiter = createRateLimiter({ windowSizeSeconds: 60, maxRequests: 1000 });
+
+// Public endpoints
+router.get('/metrics', WebhookController.getMetrics);
+
+// Authenticated & Rate limited endpoints
+router.post('/webhooks', authenticateApiKey, rateLimiter, WebhookController.registerWebhook);
+router.get('/webhooks/:id/status', authenticateApiKey, WebhookController.getWebhookStatus);
+router.get('/webhooks/:id/attempts', authenticateApiKey, WebhookController.getWebhookAttempts);
+router.post('/dlq/:id/replay', authenticateApiKey, WebhookController.replayDlqWebhook);

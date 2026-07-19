@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
+}
+
+enum EndpointStatus {
+  active
+  disabled
+}
+
+enum WebhookStatus {
+  pending
+  processing
+  delivered
+  retrying
+  failed
+  dead
+}
+
+enum ExecutionStatus {
+  success
+  failure
+  timeout
+  circuit_open
+}
+
+model WebhookEndpoint {
+  id          String         @id @default(uuid())
+  projectId   String         @map("project_id") @db.VarChar(64)
+  targetUrl   String         @map("target_url") @db.Text
+  description String?        @db.Text
+  secretV1    String         @map("secret_v1") @db.Text
+  secretV2    String?        @map("secret_v2") @db.Text
+  status      EndpointStatus @default(active)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  webhooks Webhook[]
+
+  @@index([projectId], name: "idx_endpoints_project")
+  @@map("webhook_endpoints")
+}
+
+model Webhook {
+  id            String         @id @default(uuid())
+  endpointId    String?        @map("endpoint_id")
+  targetUrl     String         @map("target_url") @db.Text
+  eventType     String         @map("event_type") @db.VarChar(100)
+  payload       Json
+  headers       Json?          @default("{}")
+  meta          Json?          @default("{}")
+  status        WebhookStatus  @default(pending)
+  maxAttempts   Int            @default(5) @map("max_attempts")
+  attemptCount  Int            @default(0) @map("attempt_count")
+  nextAttemptAt DateTime?      @map("next_attempt_at") @db.Timestamptz
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  endpoint WebhookEndpoint? @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  attempts DeliveryAttempt[]
+
+  @@index([status, nextAttemptAt], name: "idx_webhooks_status_next_attempt")
+  @@index([endpointId], name: "idx_webhooks_endpoint")
+  @@map("webhooks")
+}
+
+model DeliveryAttempt {
+  id              String          @id @default(uuid())
+  webhookId       String          @map("webhook_id")
+  attemptNumber   Int             @map("attempt_number")
+  statusCode      Int?            @map("status_code")
+  responseBody    String?         @map("response_body") @db.Text
+  responseTimeMs  Int?            @map("response_time_ms")
+  errorMessage    String?         @map("error_message") @db.Text
+  executionStatus ExecutionStatus @map("execution_status")
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId], name: "idx_delivery_attempts_webhook")
+  @@map("delivery_attempts")
+}
