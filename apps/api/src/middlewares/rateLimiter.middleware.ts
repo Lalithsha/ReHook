@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { redisConnection } from '../configs/redis.config.js';
+import { Redis } from 'ioredis';
 
 interface RateLimiterOptions {
   windowSizeSeconds?: number;
@@ -9,7 +10,7 @@ interface RateLimiterOptions {
 /**
  * Sliding Window Redis Rate Limiter
  */
-export function createRateLimiter(options: RateLimiterOptions = {}) {
+export function createRateLimiter(options: RateLimiterOptions = {}, client: Redis | any = redisConnection) {
   const windowSizeSeconds = options.windowSizeSeconds || 60; // 1 minute
   const maxRequests = options.maxRequests || 1000;          // 1000 requests / minute
 
@@ -21,7 +22,7 @@ export function createRateLimiter(options: RateLimiterOptions = {}) {
       const clearBefore = now - windowSizeSeconds * 1000;
 
       // Pipeline Redis commands for sliding window
-      const multi = redisConnection.multi();
+      const multi = client.multi();
       multi.zremrangebyscore(key, 0, clearBefore);
       multi.zadd(key, now, `${now}-${Math.random()}`);
       multi.zcard(key);
@@ -45,6 +46,8 @@ export function createRateLimiter(options: RateLimiterOptions = {}) {
     } catch (error) {
       console.error('[RateLimiter Error]', error);
       // Fail open if Redis has transient issue
+      res.setHeader('X-RateLimit-Limit', maxRequests);
+      res.setHeader('X-RateLimit-Remaining', maxRequests);
       next();
     }
   };
