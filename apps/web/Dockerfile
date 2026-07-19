@@ -12,7 +12,6 @@ RUN bun install
 
 # Copy web app source code
 COPY apps/web ./apps/web/
-COPY packages ./packages/
 
 WORKDIR /app/apps/web
 
