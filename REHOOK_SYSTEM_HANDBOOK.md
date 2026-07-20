@@ -358,6 +358,22 @@ Simulates 1,000 concurrent webhook ingestions at 50 concurrency level to measure
 
 ---
 
+### 📊 Phase 9: Published Load Benchmarks & k6 Performance Profile
+
+ReHook provides a published, reproducible performance baseline documented in [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/BENCHMARKS.md):
+
+#### 1. Ingestion Throughput & Latency Profile:
+- **Sustained Throughput:** **769 webhooks / second** (1,000 requests processed in 1.30s across 50 worker threads).
+- **Gateway Response Latency (k6):** `p(50) = 3.28ms`, `p(90) = 5.62ms`, `p(95) = 6.67ms`.
+- **End-to-End Batch Latency (Native):** `p(50) = 52ms`, `p(90) = 62ms`, `p(95) = 134ms`, `p(99) = 152ms`.
+- **Ingestion Success Rate:** **100.0%** (0 dropped jobs or 5xx failures under maximum burst load).
+
+#### 2. Circuit Breaker Efficiency Profile:
+- **Wasted Traffic Reduction:** **95% reduction** in outbound HTTP POST attempts against dead receiver endpoints.
+- **Probe Efficiency:** Evaluated across 100 delivery jobs targeting a failing host: 5 probe attempts executed, **95 attempts short-circuited** automatically by the Redis circuit breaker without worker thread starvation.
+
+---
+
 ## ⚖️ 5. Technical Trade-Off Analysis
 
 ### 1. Why Redis for Circuit Breakers instead of In-Memory or SQL DB?

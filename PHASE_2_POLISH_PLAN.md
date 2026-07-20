@@ -59,13 +59,16 @@ flowchart TD
 
 ---
 
-### 🔹 Step 2: `k6` Load Testing Suite & Published `BENCHMARKS.md`
+### 🔹 Step 2: `k6` Load Testing Suite & Published `BENCHMARKS.md` — ✅ COMPLETED
 
 - **Goal:** Produce real, un-paraphrased benchmark numbers (throughput, p50/p95/p99 latency, circuit breaker savings) to attach concrete metrics to the project.
+- **Status:** ✅ **COMPLETED** (Measured **769 req/sec** sustained throughput & **95% Circuit Breaker efficiency**)
 - **File Deliverables:**
-  - `load-tests/k6-baseline.js` (sustained throughput script)
-  - `load-tests/k6-circuit-breaker.js` (circuit breaker savings comparison script)
-  - `BENCHMARKS.md` (published benchmark report)
+  - [`load-tests/k6-baseline.js`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/k6-baseline.js) (`k6` sustained throughput load test script)
+  - [`load-tests/k6-circuit-breaker.js`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/k6-circuit-breaker.js) (`k6` circuit breaker resilience script)
+  - [`load-tests/run-benchmark.ts`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/run-benchmark.ts) (Native Bun high-concurrency benchmark runner)
+  - [`load-tests/run-cb-benchmark.ts`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/run-cb-benchmark.ts) (Native Circuit Breaker efficiency runner)
+  - [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/BENCHMARKS.md) (Published benchmark metrics report)
 
 #### Implementation Details:
 1. **`k6` Benchmark Scripts (`load-tests/`):**
