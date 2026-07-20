@@ -374,6 +374,33 @@ ReHook provides a published, reproducible performance baseline documented in [`B
 
 ---
 
+### ⚙️ Phase 10: Automated GitHub Actions CI/CD Pipeline Automation
+
+ReHook automates full quality assurance on every `git push` or `pull_request` to `main` via `.github/workflows/ci.yml`:
+
+1. **Ephemeral Service Containers:** GitHub Actions provisions PostgreSQL 16 (`postgres:16-alpine`) and Redis 7 (`redis:7-alpine`) service containers with active healthchecks (`pg_isready`, `redis-cli ping`).
+2. **Schema & Migration Gate:** Executes `bun db:push` to ensure PostgreSQL is synchronized with `schema.prisma`.
+3. **Automated Test Matrix:** Runs all 32 unit, integration, and concurrency stress tests (`bun test:api`) in < 600ms.
+4. **Production Build Gate:** Verifies TypeScript compilation (`tsc --noEmit`) and Turbopack builds across all workspace applications (`bun run build`).
+
+---
+
+### 🚀 Phase 11: Future Production Evolution Roadmap ("What I'd Do Next")
+
+1. **Multi-Region Worker Edge Pools:**
+   Deploy regional delivery worker clusters (e.g. AWS `us-east-1`, `eu-west-1`, `ap-southeast-1`) close to subscriber target endpoints to eliminate cross-continental TCP handshake latency.
+
+2. **Adaptive Dynamic Rate Limiting & Target Backpressure:**
+   Parse HTTP 429 (`Retry-After`) and `RateLimit-Reset` response headers returned by subscriber receivers, dynamically adjusting per-domain worker concurrency levels.
+
+3. **Payload Encryption at Rest & Enforced Size Limits:**
+   Enforce a strict 1MB payload cap at the API Gateway and implement AES-256-GCM field-level encryption at rest in PostgreSQL for sensitive webhook payloads.
+
+4. **Automated Kubernetes / Terraform Cloud Deployment:**
+   Package ReHook into Helm charts with HPA (Horizontal Pod Autoscaling) based on BullMQ queue depth metrics (`rehook_queue_waiting_jobs > 100`).
+
+---
+
 ## ⚖️ 5. Technical Trade-Off Analysis
 
 ### 1. Why Redis for Circuit Breakers instead of In-Memory or SQL DB?

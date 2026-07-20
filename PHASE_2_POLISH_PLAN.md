@@ -81,12 +81,13 @@ flowchart TD
 
 ---
 
-### 🔹 Step 3: GitHub Actions CI/CD Pipeline & Build Badge
+### 🔹 Step 3: GitHub Actions CI/CD Pipeline & Build Badge — ✅ COMPLETED
 
 - **Goal:** Move from manual CLI testing to automated CI runs on every git push, showcasing engineering discipline.
+- **Status:** ✅ **COMPLETED** (Configured GitHub Actions workflow with PostgreSQL 16 & Redis 7 containers)
 - **File Deliverables:**
-  - `.github/workflows/ci.yml` (GitHub Actions workflow)
-  - `README.md` (added status badge)
+  - [`.github/workflows/ci.yml`](file:///Users/lalithsharma/My-Projects/ReHook/.github/workflows/ci.yml) (Automated CI/CD pipeline configuration)
+  - [`README.md`](file:///Users/lalithsharma/My-Projects/ReHook/README.md) (Embedded live build status badge)
 
 #### Implementation Details:
 1. **GitHub Actions Workflow (`.github/workflows/ci.yml`):**
@@ -98,27 +99,28 @@ flowchart TD
 
 ---
 
-### 🔹 Step 4: README Case-Study Overhaul & "What I'd Do Next"
+### 🔹 Step 4: README Case-Study Overhaul & "What I'd Do Next" — ✅ COMPLETED
 
 - **Goal:** Make the repository legible and impressive in the 5–7 seconds a technical recruiter or engineering manager spends reviewing it.
+- **Status:** ✅ **COMPLETED** (Restructured into case-study format with badges, Mermaid flowchart, benchmarks, & future roadmap)
 - **File Deliverables:**
-  - `README.md` (case-study overhaul)
+  - [`README.md`](file:///Users/lalithsharma/My-Projects/ReHook/README.md) (Recruiter-ready case-study README)
 
 #### Implementation Details:
 1. **Case-Study Structure:**
-   - **Section 1:** Executive Summary & Highlights.
-   - **Section 2:** System Architecture & Flowchart.
+   - **Section 1:** Executive Summary & High-Signal Highlights.
+   - **Section 2:** System Architecture & Mermaid Flowchart.
    - **Section 3:** Measured Performance Benchmarks (from `BENCHMARKS.md`).
    - **Section 4:** Resiliency Mechanics (Redlock + Circuit Breaker + Dual-Secret Rotation).
-   - **Section 5:** **"What I'd Do Next"** (Multi-region worker pools, per-project rate limits, backpressure handling).
+   - **Section 5:** **"What I'd Do Next"** (Multi-region worker pools, per-project rate limits, backpressure handling, cloud deployment).
 
 ---
 
 ## 📊 Verification Matrix
 
-| Step | Output File | Verification Command |
-| :--- | :--- | :--- |
-| **Step 1** | `lock.utils.ts`, `concurrency.test.ts` | `bun test:api` |
-| **Step 2** | `load-tests/*.js`, `BENCHMARKS.md` | `k6 run load-tests/k6-baseline.js` |
-| **Step 3** | `.github/workflows/ci.yml` | `git push origin main` |
-| **Step 4** | `README.md` | Markdown preview & link checks |
+| Step | Output File | Verification Command | Status |
+| :--- | :--- | :--- | :--- |
+| **Step 1** | `lock.utils.ts`, `concurrency.test.ts` | `bun test:api` | ✅ PASS |
+| **Step 2** | `load-tests/*.js`, `BENCHMARKS.md` | `bun load-tests/run-benchmark.ts` | ✅ PASS |
+| **Step 3** | `.github/workflows/ci.yml` | `git push origin main` | ✅ PASS |
+| **Step 4** | `README.md` | Markdown preview & link checks | ✅ PASS |

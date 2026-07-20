@@ -1,0 +1,70 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    name: Test & Build Suite
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rehook
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun Runtime
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Monorepo Dependencies
+        run: bun install
+
+      - name: Push Prisma Database Schema
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@localhost:5432/rehook
+        run: bun db:push
+
+      - name: Run API Unit, Integration & Concurrency Tests (32 Tests)
+        env:
+          PORT: 3001
+          X_API_KEY: super_secret_rehook_key_123
+          POSTGRES_URL: postgres://postgres:postgres@localhost:5432/rehook
+          REDIS_URL: redis://localhost:6379
+          RETRY_QUEUE_NAME: rehook-delivery-queue
+          DLQ_QUEUE_NAME: rehook-dlq-queue
+          NODE_ENV: test
+        run: bun test:api
+
+      - name: Build Next.js Dashboard & Workspace Apps
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+        run: bun run build
