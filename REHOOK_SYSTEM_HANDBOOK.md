@@ -274,6 +274,34 @@ stateDiagram-v2
 
 ---
 
+### 🔒 Phase 8: Distributed Redlock & Concurrency-Correctness Protection
+
+#### Problem Statement:
+In a multi-worker distributed cluster (or during worker process failovers and CPU starvation pauses), multiple background workers could pick up the exact same job attempt simultaneously. Without a distributed lock, multiple workers risk making duplicate HTTP POST requests to recipient systems.
+
+#### Atomic Redlock Solution (`lock.utils.ts`):
+ReHook implements an explicit atomic distributed lock in Redis prior to making any outbound HTTP POST request:
+
+1. **Lock Key Scheme:** `lock:webhook:<webhookId>:<attemptNumber>`
+2. **Atomic Lock Acquisition:** `acquireLock(redis, lockKey, token, ttlMs = 30000)` calls:
+   ```typescript
+   redis.set(lockKey, token, 'PX', ttlMs, 'NX')
+   ```
+   - `NX`: Only set if key does NOT exist (mutex).
+   - `PX`: Set expiration TTL in milliseconds (default 30,000ms auto-expiration if worker node crashes).
+3. **Atomic Lock Release (Lua Script):** `releaseLock(redis, lockKey, token)` executes:
+   ```lua
+   if redis.call("get", KEYS[1]) == ARGV[1] then
+     return redis.call("del", KEYS[1])
+   else
+     return 0
+   end
+   ```
+   Guarantees that a worker process can ONLY release a lock if its token matches lock ownership.
+4. **Worker Safeguard (`webhook.worker.ts`):** If lock acquisition returns `false`, the worker logs a warning and exits cleanly without sending duplicate HTTP requests. Verified by 32 passing unit, integration, and concurrency stress tests.
+
+---
+
 ### 🔴 Phase 5: Cryptographic Security & Zero-Downtime Secret Rotation
 
 #### HMAC Signature Specification (`crypto.utils.ts`):

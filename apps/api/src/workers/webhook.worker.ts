@@ -5,9 +5,11 @@ import { prisma } from '../db/index.js';
 import { DistributedCircuitBreaker } from '../services/circuitBreaker.service.js';
 import { buildSignatureHeader } from '../utils/crypto.utils.js';
 import { calculateExponentialJitterBackoff } from '../utils/backoff.utils.js';
+import { acquireLock, releaseLock } from '../utils/lock.utils.js';
 import { dlqQueue, deliveryQueue, WebhookJobData } from '../queues/webhook.queue.js';
 import { webhooksDeliveredTotal, deliveryLatencyHistogram } from '../services/telemetry.service.js';
 import { ExecutionStatus, WebhookStatus } from '@prisma/client';
+import crypto from 'crypto';
 
 export const deliveryWorker = new Worker<WebhookJobData>(
   config.retryQueueName,
@@ -25,8 +27,20 @@ export const deliveryWorker = new Worker<WebhookJobData>(
       return;
     }
 
-    const targetUrl = webhook.targetUrl;
-    const circuitBreaker = new DistributedCircuitBreaker(targetUrl);
+    const currentAttempt = webhook.attemptCount + 1;
+    const lockKey = `lock:webhook:${webhookId}:${currentAttempt}`;
+    const lockToken = crypto.randomUUID();
+
+    // Acquire atomic execution lock to prevent duplicate sends under worker failover
+    const acquired = await acquireLock(redisConnection, lockKey, lockToken, 30000);
+    if (!acquired) {
+      console.warn(`[Worker] Concurrency lock active for webhook ${webhookId} attempt ${currentAttempt}. Skipping duplicate execution.`);
+      return;
+    }
+
+    try {
+      const targetUrl = webhook.targetUrl;
+      const circuitBreaker = new DistributedCircuitBreaker(targetUrl);
 
     // 1. Check Circuit Breaker State
     const isAllowed = await circuitBreaker.isAllowed();
@@ -190,6 +204,9 @@ export const deliveryWorker = new Worker<WebhookJobData>(
         );
         console.warn(`[Worker] Webhook ${webhookId} failed attempt ${currentAttempt}/${webhook.maxAttempts}. Retrying in ${backoffMs}ms`);
       }
+    }
+    } finally {
+      await releaseLock(redisConnection, lockKey, lockToken).catch(() => {});
     }
   },
   {

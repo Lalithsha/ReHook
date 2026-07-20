@@ -20,12 +20,13 @@ A production-grade, highly available, fault-tolerant **Webhook Delivery Platform
 ## ⚡ Core Features
 
 - 🚀 **Sub-15ms Ingestion Latency:** Fast-path REST API gateway enqueues jobs directly into BullMQ without waiting for external receiver responses.
+- 🔒 **Distributed Redlock Execution Protection:** Atomic Redis locks (`acquireLock`/`releaseLock` with Lua scripts) guarantee zero duplicate HTTP deliveries across horizontal worker processes.
 - 🛡️ **Distributed Redis Circuit Breaker:** 3-State machine (`CLOSED`, `OPEN`, `HALF-OPEN`) stored atomically in Redis to prevent hammering failing target hosts.
 - 🎲 **Exponential Backoff with Full Jitter:** Prevents thundering herd spikes when recovering from downstream subscriber outages.
 - 🔐 **Zero-Downtime Secret Rotation:** HMAC-SHA256 signature generator supports dual-signature headers (`v1` and `v2` keys) during key updates.
 - 📊 **Prometheus Telemetry:** Built-in `/api/v1/metrics` endpoint exposing ingestion counters, 95th percentile latency histograms, and delivery failure rates.
 - ☠️ **DLQ & Manual Replay Engine:** Persistent Dead-Letter Queue for exhausted retries with manual and programmatic single/bulk replay APIs.
-- ⚡ **Powered by Bun:** Ultra-fast TypeScript execution, dependency resolution, and native test runner.
+- ⚡ **Powered by Bun:** Ultra-fast TypeScript execution, dependency resolution, and native test runner (32 passing unit, integration, and concurrency tests).
 
 ---
 
