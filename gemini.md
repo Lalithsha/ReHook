@@ -15,11 +15,14 @@
 ## 📁 Repository Map
 
 ```
-/Users/lalithsharma/My-Projects/ReHook
-├── PRODUCTION_PLAN.md        # Master production architecture blueprint & trade-offs
 ├── README.md                 # Project user documentation
 ├── gemini.md                 # AI assistant context & developer handbook
 ├── package.json              # Monorepo root Bun package manifest
+├── docs/                     # Production plans, handbooks, & benchmark reports
+│   ├── BENCHMARKS.md         # Published k6 & throughput load test report
+│   ├── PHASE_2_POLISH_PLAN.md# Execution roadmap for polish & concurrency
+│   ├── PRODUCTION_PLAN.md   # Master production architecture blueprint & trade-offs
+│   └── REHOOK_SYSTEM_HANDBOOK.md # Single source of truth system handbook
 ├── apps/
 │   └── api/                  # Core Webhook Delivery Engine microservice
 │       ├── prisma/

@@ -68,7 +68,7 @@ flowchart TD
   - [`load-tests/k6-circuit-breaker.js`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/k6-circuit-breaker.js) (`k6` circuit breaker resilience script)
   - [`load-tests/run-benchmark.ts`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/run-benchmark.ts) (Native Bun high-concurrency benchmark runner)
   - [`load-tests/run-cb-benchmark.ts`](file:///Users/lalithsharma/My-Projects/ReHook/load-tests/run-cb-benchmark.ts) (Native Circuit Breaker efficiency runner)
-  - [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/BENCHMARKS.md) (Published benchmark metrics report)
+  - [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/docs/BENCHMARKS.md) (Published benchmark metrics report)
 
 #### Implementation Details:
 1. **`k6` Benchmark Scripts (`load-tests/`):**

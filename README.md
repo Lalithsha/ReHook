@@ -16,10 +16,10 @@
 
 **ReHook** is an enterprise-grade, high-throughput, fault-tolerant **Webhook Delivery Engine**. Built for scale, it handles zero-loss asynchronous event dispatching, atomic **distributed Redlock execution protection**, automatic retries with **exponential randomized jitter backoff**, **distributed Redis circuit breaking**, **zero-downtime secret rotation**, quota rate limiting, **dead-letter queue (DLQ)** management, and a **Next.js operator dashboard**.
 
-> 📘 **Master System Handbook:** See [REHOOK_SYSTEM_HANDBOOK.md](file:///Users/lalithsharma/My-Projects/ReHook/REHOOK_SYSTEM_HANDBOOK.md) for the single-source-of-truth technical handbook, schema models, and design trade-offs.  
-> 📊 **Published Performance Report:** See [BENCHMARKS.md](file:///Users/lalithsharma/My-Projects/ReHook/BENCHMARKS.md) for load testing methodologies and latency percentiles.  
-> 📖 **Production Master Blueprint:** See [PRODUCTION_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/PRODUCTION_PLAN.md) for architecture planning.  
-> 🎯 **Phase 2 Polish Plan:** See [PHASE_2_POLISH_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/PHASE_2_POLISH_PLAN.md) for roadmap progress.
+> 📘 **Master System Handbook:** See [REHOOK_SYSTEM_HANDBOOK.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/REHOOK_SYSTEM_HANDBOOK.md) for the single-source-of-truth technical handbook, schema models, and design trade-offs.  
+> 📊 **Published Performance Report:** See [BENCHMARKS.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/BENCHMARKS.md) for load testing methodologies and latency percentiles.  
+> 📖 **Production Master Blueprint:** See [PRODUCTION_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/PRODUCTION_PLAN.md) for architecture planning.  
+> 🎯 **Phase 2 Polish Plan:** See [PHASE_2_POLISH_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/PHASE_2_POLISH_PLAN.md) for roadmap progress.
 
 ---
 
@@ -99,7 +99,7 @@ flowchart TD
 
 ## 📊 Published Performance & Resilience Benchmarks
 
-ReHook includes published, reproducible performance metrics (see [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/BENCHMARKS.md)):
+ReHook includes published, reproducible performance metrics (see [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/docs/BENCHMARKS.md)):
 
 | Metric | Measured Benchmark Value | Target / SLA | Status |
 | :--- | :--- | :--- | :--- |

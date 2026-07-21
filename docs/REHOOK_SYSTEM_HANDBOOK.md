@@ -360,7 +360,7 @@ Simulates 1,000 concurrent webhook ingestions at 50 concurrency level to measure
 
 ### 📊 Phase 9: Published Load Benchmarks & k6 Performance Profile
 
-ReHook provides a published, reproducible performance baseline documented in [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/BENCHMARKS.md):
+ReHook provides a published, reproducible performance baseline documented in [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/docs/BENCHMARKS.md):
 
 #### 1. Ingestion Throughput & Latency Profile:
 - **Sustained Throughput:** **769 webhooks / second** (1,000 requests processed in 1.30s across 50 worker threads).
