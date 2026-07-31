@@ -1,79 +1,97 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --bg-main: #0B0F17;
-  --bg-surface: #111827;
-  --bg-card: rgba(17, 24, 39, 0.75);
-  --border-color: rgba(255, 255, 255, 0.08);
+  --bg-obsidian: #05070E;
+  --bg-card-surface: rgba(13, 18, 30, 0.75);
+  --bg-card-hover: rgba(18, 25, 42, 0.85);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-glow-cyan: rgba(56, 189, 248, 0.3);
+  --border-glow-emerald: rgba(52, 211, 153, 0.3);
+  --border-glow-rose: rgba(244, 63, 94, 0.3);
 }
 
 body {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: var(--bg-main);
-  color: #f3f4f6;
+  background-color: var(--bg-obsidian);
+  color: #f1f5f9;
   min-height: 100vh;
+  /* Vibe Coded Mesh Background Grid */
   background-image: 
-    radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.08) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.08) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 45%),
+    radial-gradient(at 100% 0%, rgba(129, 140, 248, 0.12) 0px, transparent 45%),
+    radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.06) 0px, transparent 50%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 32px 32px;
   background-attachment: fixed;
 }
 
-code, pre {
+h1, h2, h3, .font-heading {
+  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+}
+
+code, pre, .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Glassmorphism Elements */
-.glass-panel {
-  background: var(--bg-card);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+/* Glassmorphism Vibe Panel */
+.vibe-glass-panel {
+  background: var(--bg-card-surface);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-subtle);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.glass-nav {
-  background: rgba(11, 15, 23, 0.85);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border-color);
+.vibe-glass-panel:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 25px -5px rgba(56, 189, 248, 0.12);
 }
 
-/* Status Badges */
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+/* Neon Glow Shimmer Buttons */
+.vibe-btn-primary {
+  background: linear-gradient(135deg, #0284c7 0%, #38bdf8 50%, #6366f1 100%);
+  background-size: 200% 200%;
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 14px;
+  box-shadow: 0 4px 20px -2px rgba(56, 189, 248, 0.4), inset 0 1px 0 0 rgba(255, 255, 255, 0.3);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.status-pending {
-  background: rgba(245, 158, 11, 0.12);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+.vibe-btn-primary:hover {
+  background-position: 100% 0%;
+  box-shadow: 0 6px 25px 0px rgba(56, 189, 248, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
 }
 
-.status-delivered {
+.vibe-btn-primary:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+/* Status Glow Indicators */
+.status-pill-delivered {
   background: rgba(16, 185, 129, 0.12);
   color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 12px -2px rgba(52, 211, 153, 0.3);
 }
 
-.status-retrying {
-  background: rgba(14, 165, 233, 0.12);
+.status-pill-retrying {
+  background: rgba(56, 189, 248, 0.12);
   color: #38bdf8;
-  border: 1px solid rgba(14, 165, 233, 0.3);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 0 12px -2px rgba(56, 189, 248, 0.3);
 }
 
-.status-dead {
+.status-pill-dead {
   background: rgba(244, 63, 94, 0.12);
   color: #f87171;
-  border: 1px solid rgba(244, 63, 94, 0.3);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  box-shadow: 0 0 12px -2px rgba(244, 63, 94, 0.3);
 }
 
 /* Custom Scrollbar */
@@ -83,32 +101,14 @@ code, pre {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0B0F17;
+  background: #05070E;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1f2937;
-  border-radius: 3px;
+  background: #1e293b;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
-}
-
-/* Input Fields */
-.input-field {
-  width: 100%;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background-color: #0d1322;
-  border: 1px solid #1f2937;
-  color: #f3f4f6;
-  font-size: 0.875rem;
-  transition: all 0.2s ease;
-}
-
-.input-field:focus {
-  outline: none;
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+  background: #38bdf8;
 }

@@ -33,6 +33,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Misc
+# Misc & Local Developer Reference Logs
 .DS_Store
 *.pem
+docs/DEVELOPER_QA_LOG.md

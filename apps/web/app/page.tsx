@@ -1,338 +1,323 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Activity, ShieldAlert, CheckCircle2, Clock, Play, RefreshCw, Send, AlertCircle, Layers } from 'lucide-react';
-
-interface WebhookJob {
-  id: string;
-  target_url: string;
-  event_type: string;
-  status: 'pending' | 'processing' | 'delivered' | 'retrying' | 'failed' | 'dead';
-  attempt_count: number;
-  max_attempts: number;
-  replay_count: number;
-  created_at: string;
-}
+import Navbar from '@/components/Navbar';
+import MetricsCards from '@/components/MetricsCards';
+import WebhookDrawer from '@/components/WebhookDrawer';
+import QuickDispatchModal from '@/components/QuickDispatchModal';
+import { WebhookJob, fetchWebhooks } from '@/lib/api';
+import { Activity, RefreshCw, Send, Search, Filter, AlertCircle, Eye } from 'lucide-react';
 
 export default function DashboardPage() {
   const [webhooks, setWebhooks] = useState<WebhookJob[]>([]);
-  const [filter, setFilter] = useState<string>('ALL');
+  const [totalWebhooks, setTotalWebhooks] = useState(0);
+  const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Quick Dispatch Form State
-  const [targetUrl, setTargetUrl] = useState('https://httpbin.org/post');
-  const [eventType, setEventType] = useState('order.completed');
-  const [submitting, setSubmitting] = useState(false);
-  const [triggerMessage, setTriggerMessage] = useState<string | null>(null);
+  // Drawer & Modal states
+  const [selectedWebhook, setSelectedWebhook] = useState<WebhookJob | null>(null);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
 
-  const fetchWebhooks = async () => {
+  const loadData = async (showLoadingSpinner = false) => {
     try {
-      setLoading(true);
-      const res = await fetch('http://localhost:3001/api/v1/webhooks?limit=50', {
-        headers: {
-          'x-api-key': 'super_secret_rehook_key_123',
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error(`API returned HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-      setWebhooks(data.webhooks || []);
+      if (showLoadingSpinner) setLoading(true);
+      const res = await fetchWebhooks(100, 0, filterStatus);
+      setWebhooks(res.webhooks || []);
+      setTotalWebhooks(res.total || (res.webhooks ? res.webhooks.length : 0));
       setError(null);
+      setLastUpdated(new Date());
     } catch (err: any) {
-      setError(err.message || 'Unable to connect to ReHook API server on port 3001');
+      setError(err.message || 'Unable to connect to ReHook API server');
     } finally {
-      setLoading(false);
+      if (showLoadingSpinner) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchWebhooks();
-    const interval = setInterval(fetchWebhooks, 4000); // Auto-refresh every 4 seconds
+    loadData(true);
+  }, [filterStatus]);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const interval = setInterval(() => {
+      loadData(false);
+    }, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [autoRefresh, filterStatus]);
 
-  const handleRegisterWebhook = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setTriggerMessage(null);
-
-    try {
-      const res = await fetch('http://localhost:3001/api/v1/webhooks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': 'super_secret_rehook_key_123',
-        },
-        body: JSON.stringify({
-          target_url: targetUrl,
-          event_type: eventType,
-          payload: {
-            source: 'ReHook Console',
-            timestamp: new Date().toISOString(),
-            order_id: `ORD-${Math.floor(Math.random() * 90000) + 10000}`,
-            amount: 2999.00,
-          },
-          retry_config: {
-            max_attempts: 5,
-            initial_delay_ms: 3000,
-          },
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setTriggerMessage(`✅ Webhook Enqueued! ID: ${data.webhook_id}`);
-        fetchWebhooks();
-      } else {
-        setTriggerMessage(`❌ Dispatch Error: ${data.message || 'Unknown error'}`);
-      }
-    } catch (err: any) {
-      setTriggerMessage(`❌ Network Error: ${err.message}`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+  // Client-side search filtering
   const filteredWebhooks = webhooks.filter((w) => {
-    if (filter === 'ALL') return true;
-    return w.status.toUpperCase() === filter;
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const idMatch = w.id.toLowerCase().includes(q);
+    const urlMatch = (w.target_url || w.targetUrl || '').toLowerCase().includes(q);
+    const eventMatch = (w.event_type || w.eventType || '').toLowerCase().includes(q);
+    return idMatch || urlMatch || eventMatch;
   });
 
-  const totalCount = webhooks.length;
+  // Calculate metrics stats
   const deliveredCount = webhooks.filter((w) => w.status === 'delivered').length;
   const deadCount = webhooks.filter((w) => w.status === 'dead').length;
   const retryingCount = webhooks.filter((w) => ['retrying', 'pending', 'processing'].includes(w.status)).length;
-  const successRate = totalCount > 0 ? ((deliveredCount / totalCount) * 100).toFixed(1) : '100.0';
+
+  const statusOptions = ['ALL', 'DELIVERED', 'RETRYING', 'PENDING', 'DEAD'];
+
+  const getStatusBadgeStyle = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'delivered':
+        return 'status-pill-delivered';
+      case 'retrying':
+      case 'processing':
+      case 'pending':
+        return 'status-pill-retrying';
+      case 'dead':
+      case 'failed':
+        return 'status-pill-dead';
+      default:
+        return 'bg-slate-800 text-slate-300 border-slate-700';
+    }
+  };
 
   return (
-    <div className="space-y-8">
+    <div className="min-h-screen flex flex-col">
+      <Navbar
+        autoRefresh={autoRefresh}
+        onToggleAutoRefresh={() => setAutoRefresh(!autoRefresh)}
+        lastUpdated={lastUpdated}
+      />
 
-      {/* Page Title Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
-            <Activity className="w-6 h-6 text-sky-400" />
-            Live Webhook Delivery Monitor
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Real-time delivery status tracking, exponential jitter retries & circuit breaker orchestrator.
-          </p>
-        </div>
-        <button
-          onClick={fetchWebhooks}
-          className="self-start md:self-auto px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-xs font-semibold text-slate-200 border border-slate-700/80 flex items-center gap-2 transition-all shadow-sm active:scale-95"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 text-sky-400 ${loading ? 'animate-spin' : ''}`} />
-          Refresh Stats
-        </button>
-      </div>
-
-      {error && (
-        <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         
-        {/* Total Ingested */}
-        <div className="glass-panel p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Total Ingested</span>
-            <div className="w-8 h-8 rounded-lg bg-sky-950/80 border border-sky-800/60 flex items-center justify-center">
-              <Layers className="w-4 h-4 text-sky-400" />
-            </div>
-          </div>
-          <div className="text-3xl font-extrabold text-white">{totalCount}</div>
-          <p className="text-xs text-slate-500">Events processed in queue</p>
-        </div>
-
-        {/* Success Rate */}
-        <div className="glass-panel p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Success Rate</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-950/80 border border-emerald-800/60 flex items-center justify-center">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            </div>
-          </div>
-          <div className="text-3xl font-extrabold text-emerald-400">{successRate}%</div>
-          <p className="text-xs text-slate-500">{deliveredCount} delivered successfully</p>
-        </div>
-
-        {/* Active Retries */}
-        <div className="glass-panel p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Active Retries</span>
-            <div className="w-8 h-8 rounded-lg bg-amber-950/80 border border-amber-800/60 flex items-center justify-center">
-              <Clock className="w-4 h-4 text-amber-400" />
-            </div>
-          </div>
-          <div className="text-3xl font-extrabold text-amber-400">{retryingCount}</div>
-          <p className="text-xs text-slate-500">In BullMQ backoff queue</p>
-        </div>
-
-        {/* Dead Letters */}
-        <div className="glass-panel p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Dead Letters (DLQ)</span>
-            <div className="w-8 h-8 rounded-lg bg-rose-950/80 border border-rose-800/60 flex items-center justify-center">
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
-            </div>
-          </div>
-          <div className="text-3xl font-extrabold text-rose-400">{deadCount}</div>
-          <p className="text-xs text-slate-500">Exhausted max attempts</p>
-        </div>
-
-      </div>
-
-      {/* Quick Dispatch Webhook Form */}
-      <div className="glass-panel p-6 space-y-4">
-        <h2 className="text-base font-bold text-white flex items-center gap-2">
-          <Send className="w-4 h-4 text-sky-400" />
-          Dispatch Test Webhook Event
-        </h2>
-        
-        <form onSubmit={handleRegisterWebhook} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-          <div className="md:col-span-6 space-y-1.5">
-            <label className="block text-xs font-semibold text-slate-300">Target Webhook Endpoint URL</label>
-            <input
-              type="url"
-              required
-              value={targetUrl}
-              onChange={(e) => setTargetUrl(e.target.value)}
-              className="input-field font-mono"
-              placeholder="https://httpbin.org/post"
-            />
+        {/* Title & Action Header Banner */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/50 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-2xl shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-sky-500/5 rounded-full blur-3xl pointer-events-none" />
+          
+          <div className="space-y-1 z-10">
+            <h1 className="text-2xl sm:text-3xl font-heading font-black tracking-tight flex items-center gap-3 whitespace-nowrap">
+              <div className="w-10 h-10 rounded-xl bg-sky-950/80 border border-sky-500/40 flex items-center justify-center shrink-0 shadow-inner">
+                <Activity className="w-5 h-5 text-sky-400 shrink-0" />
+              </div>
+              <span className="bg-gradient-to-r from-white via-slate-100 to-sky-200 bg-clip-text text-transparent">
+                Live Webhook Stream & Telemetry
+              </span>
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Real-time delivery status monitor, exponential jitter retries, and Redis circuit breaker state.
+            </p>
           </div>
 
-          <div className="md:col-span-3 space-y-1.5">
-            <label className="block text-xs font-semibold text-slate-300">Event Type</label>
-            <input
-              type="text"
-              required
-              value={eventType}
-              onChange={(e) => setEventType(e.target.value)}
-              className="input-field font-mono"
-              placeholder="order.completed"
-            />
-          </div>
-
-          <div className="md:col-span-3">
+          <div className="flex items-center gap-3 shrink-0 z-10">
             <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 font-bold text-xs text-white shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+              onClick={() => loadData(true)}
+              className="px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-700/80 flex items-center gap-2 transition-all shadow-sm active:scale-95 whitespace-nowrap"
             >
-              {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-white" />}
-              Enqueue Webhook
+              <RefreshCw className={`w-4 h-4 text-sky-400 shrink-0 ${loading ? 'animate-spin' : ''}`} />
+              <span className="whitespace-nowrap font-mono">Refresh</span>
+            </button>
+            <button
+              onClick={() => setIsDispatchModalOpen(true)}
+              className="vibe-btn-primary px-5 py-2.5 text-xs font-bold flex items-center gap-2 whitespace-nowrap"
+            >
+              <Send className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">Dispatch Webhook</span>
             </button>
           </div>
-        </form>
+        </div>
 
-        {triggerMessage && (
-          <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs font-mono text-slate-200">
-            {triggerMessage}
+        {/* Error Alert */}
+        {error && (
+          <div className="p-4 rounded-2xl bg-rose-950/50 border border-rose-500/40 text-xs text-rose-200 flex items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={() => loadData(true)}
+              className="px-3 py-1 bg-rose-900/80 hover:bg-rose-800 rounded-lg font-mono text-[11px] text-white whitespace-nowrap border border-rose-500/30"
+            >
+              Retry Connection
+            </button>
           </div>
         )}
-      </div>
 
-      {/* Webhook Deliveries Filter & Data Table */}
-      <div className="glass-panel overflow-hidden">
-        
-        <div className="p-5 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h3 className="font-bold text-base text-white">Recent Webhook Deliveries</h3>
+        {/* Metrics KPI Cards */}
+        <MetricsCards
+          total={totalWebhooks}
+          delivered={deliveredCount}
+          retrying={retryingCount}
+          dead={deadCount}
+          loading={loading}
+        />
 
-          {/* Filter Status Tabs */}
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800/80 text-xs font-semibold">
-            {['ALL', 'PENDING', 'DELIVERED', 'RETRYING', 'DEAD'].map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  filter === f
-                    ? 'bg-sky-500/15 text-sky-400 border border-sky-500/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {f}
-              </button>
-            ))}
+        {/* Filters & Search Control Bar */}
+        <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-4 rounded-2xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 shadow-xl">
+          
+          {/* Status Filter Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 shrink-0">
+            <span className="text-xs font-mono text-slate-400 mr-1 flex items-center gap-1.5 whitespace-nowrap font-semibold">
+              <Filter className="w-3.5 h-3.5 text-sky-400 shrink-0" /> Status:
+            </span>
+            {statusOptions.map((status) => {
+              const active = filterStatus === status;
+              return (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(status)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition-all whitespace-nowrap ${
+                    active
+                      ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-500/25 border border-sky-400/40'
+                      : 'bg-slate-950/80 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  }`}
+                >
+                  {status}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search Bar */}
+          <div className="relative w-full md:w-80">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5 shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search URL, ID, or Event..."
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-950/90 border border-slate-800 text-xs font-mono text-slate-200 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-all placeholder:text-slate-500"
+            />
+          </div>
+
+        </div>
+
+        {/* Webhooks Stream Table */}
+        <div className="rounded-2xl bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 overflow-hidden shadow-2xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              
+              <thead className="bg-slate-950/90 border-b border-slate-800/80 text-slate-400 font-mono uppercase text-[11px] tracking-wider">
+                <tr>
+                  <th className="py-4 px-4 font-bold whitespace-nowrap">Webhook ID</th>
+                  <th className="py-4 px-4 font-bold whitespace-nowrap">Event Type</th>
+                  <th className="py-4 px-4 font-bold whitespace-nowrap">Target URL</th>
+                  <th className="py-4 px-4 font-bold text-center whitespace-nowrap">Status</th>
+                  <th className="py-4 px-4 font-bold text-center whitespace-nowrap">Attempts</th>
+                  <th className="py-4 px-4 font-bold text-right whitespace-nowrap">Timestamp</th>
+                  <th className="py-4 px-4 font-bold text-center whitespace-nowrap">Inspect</th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-800/50 font-mono text-slate-300">
+                {loading && webhooks.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-400 animate-pulse font-mono">
+                      Loading delivery stream from ReHook engine...
+                    </td>
+                  </tr>
+                ) : filteredWebhooks.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-16 text-center text-slate-400 space-y-3">
+                      <p className="font-mono text-xs">No webhooks matching current filter criteria.</p>
+                      <button
+                        onClick={() => setIsDispatchModalOpen(true)}
+                        className="px-4 py-2 rounded-xl bg-sky-950 border border-sky-500/40 text-sky-400 text-xs font-bold whitespace-nowrap"
+                      >
+                        Dispatch a Test Webhook
+                      </button>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredWebhooks.map((w) => {
+                    const targetUrl = w.target_url || w.targetUrl;
+                    const eventType = w.event_type || w.eventType;
+                    const attemptCount = w.attempt_count ?? w.attemptCount ?? 0;
+                    const maxAttempts = w.max_attempts ?? w.maxAttempts ?? 5;
+                    const createdAt = w.created_at || w.createdAt;
+
+                    return (
+                      <tr
+                        key={w.id}
+                        onClick={() => setSelectedWebhook(w)}
+                        className="hover:bg-slate-800/40 hover:border-l-2 hover:border-l-sky-400 cursor-pointer transition-all duration-150 group"
+                      >
+                        {/* ID */}
+                        <td className="py-3.5 px-4 font-bold text-sky-400 group-hover:text-sky-300 group-hover:underline whitespace-nowrap">
+                          {w.id.slice(0, 8)}...
+                        </td>
+
+                        {/* Event Type */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="px-2.5 py-0.5 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 text-[11px] font-bold whitespace-nowrap shadow-sm">
+                            {eventType}
+                          </span>
+                        </td>
+
+                        {/* Target URL */}
+                        <td className="py-3.5 px-4 max-w-xs truncate text-slate-300 whitespace-nowrap">
+                          {targetUrl}
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${getStatusBadgeStyle(w.status)}`}>
+                            {w.status === 'retrying' || w.status === 'pending' ? (
+                              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse shrink-0 shadow-[0_0_8px_#38bdf8]" />
+                            ) : null}
+                            {w.status}
+                          </span>
+                        </td>
+
+                        {/* Attempts */}
+                        <td className="py-3.5 px-4 text-center text-slate-400 whitespace-nowrap">
+                          <span className="text-white font-bold">{attemptCount}</span> / {maxAttempts}
+                        </td>
+
+                        {/* Timestamp */}
+                        <td className="py-3.5 px-4 text-right text-slate-400 text-[11px] whitespace-nowrap">
+                          {createdAt ? new Date(createdAt).toLocaleTimeString() : 'N/A'}
+                        </td>
+
+                        {/* Action */}
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedWebhook(w);
+                            }}
+                            className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-sky-900/80 text-slate-300 hover:text-sky-300 transition-all border border-slate-700/60 shadow-sm"
+                            title="Inspect Payload & Logs"
+                          >
+                            <Eye className="w-4 h-4 shrink-0" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+
+            </table>
           </div>
         </div>
 
-        {/* Data Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-950/60 text-xs uppercase font-bold text-slate-400 border-b border-slate-800/80 tracking-wider">
-              <tr>
-                <th className="px-6 py-3.5">Event Type</th>
-                <th className="px-6 py-3.5">Target Endpoint URL</th>
-                <th className="px-6 py-3.5">Status</th>
-                <th className="px-6 py-3.5">Attempts</th>
-                <th className="px-6 py-3.5">Replays</th>
-                <th className="px-6 py-3.5">Created At</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-              {filteredWebhooks.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 text-sm">
-                    {loading ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
-                        Fetching pipeline data...
-                      </div>
-                    ) : (
-                      'No webhooks found in delivery pipeline.'
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                filteredWebhooks.map((job) => (
-                  <tr key={job.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="px-6 py-4 font-semibold">
-                      <span className="px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800 text-xs font-mono text-sky-300">
-                        {job.event_type}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-xs font-mono text-slate-300 max-w-xs truncate">
-                      {job.target_url}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`status-badge status-${job.status.toLowerCase()}`}>
-                        {job.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-slate-300 font-mono">
-                      <span className="font-bold text-white">{job.attempt_count}</span> / {job.max_attempts}
-                    </td>
-                    <td className="px-6 py-4 text-xs">
-                      {job.replay_count > 0 ? (
-                        <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/80 font-bold font-mono">
-                          {job.replay_count}x
-                        </span>
-                      ) : (
-                        <span className="text-slate-600">-</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-xs text-slate-400 font-mono">
-                      {new Date(job.created_at).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      </main>
 
-      </div>
+      {/* Inspector Slide-over Drawer */}
+      <WebhookDrawer
+        webhook={selectedWebhook}
+        onClose={() => setSelectedWebhook(null)}
+        onRefresh={() => loadData(false)}
+      />
 
+      {/* Dispatch Test Modal */}
+      <QuickDispatchModal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        onSuccess={() => loadData(true)}
+      />
     </div>
   );
 }

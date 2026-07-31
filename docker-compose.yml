@@ -87,11 +87,15 @@ services:
     restart: always
     ports:
       - '3000:3000'
+    environment:
+      WATCHPACK_POLLING: 'true'
+      NEXT_PUBLIC_API_URL: 'http://localhost:3001/api/v1'
+      NEXT_PUBLIC_API_KEY: 'super_secret_rehook_key_123'
     volumes:
-      - ./apps/web/app:/app/apps/web/app
+      - ./apps/web:/app/apps/web
     depends_on:
       - api
-    command: bun run dev
+    command: sh -c "bun install && bun run dev"
 
 volumes:
   postgres_data:

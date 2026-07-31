@@ -1,179 +1,255 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Skull, RefreshCw, AlertOctagon, RotateCcw, CheckCircle, ExternalLink } from 'lucide-react';
+import Navbar from '@/components/Navbar';
+import WebhookDrawer from '@/components/WebhookDrawer';
+import { WebhookJob, fetchDlqWebhooks, replayDlqWebhook } from '@/lib/api';
+import { Skull, RefreshCw, Play, AlertCircle, Eye, CheckCircle2, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
 
-interface DeadWebhook {
-  id: string;
-  targetUrl: string;
-  eventType: string;
-  payload: any;
-  status: string;
-  maxAttempts: number;
-  attemptCount: number;
-  replayCount: number;
-  createdAt: string;
-  attempts?: Array<{
-    errorMessage?: string;
-    statusCode?: number;
-    responseTimeMs?: number;
-  }>;
-}
-
-export default function DeadLetterQueuePage() {
-  const [deadWebhooks, setDeadWebhooks] = useState<DeadWebhook[]>([]);
+export default function DlqPage() {
+  const [dlqWebhooks, setDlqWebhooks] = useState<WebhookJob[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedWebhook, setSelectedWebhook] = useState<WebhookJob | null>(null);
   const [replayingId, setReplayingId] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [replayingAll, setReplayingAll] = useState(false);
 
-  const fetchDLQ = async () => {
+  const loadDlq = async (showSpinner = false) => {
     try {
-      setLoading(true);
-      const res = await fetch('http://localhost:3001/api/v1/dlq?limit=50', {
-        headers: {
-          'x-api-key': 'super_secret_rehook_key_123',
-        },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setDeadWebhooks(data.webhooks || []);
-      }
+      if (showSpinner) setLoading(true);
+      const res = await fetchDlqWebhooks(100, 0);
+      setDlqWebhooks(res.webhooks || []);
+      setError(null);
     } catch (err: any) {
-      console.error('Failed to fetch DLQ:', err);
+      setError(err.message || 'Failed to load Dead Letter Queue');
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDLQ();
+    loadDlq(true);
   }, []);
 
-  const handleReplay = async (id: string) => {
-    setReplayingId(id);
+  const handleReplaySingle = async (id: string) => {
     try {
-      const res = await fetch(`http://localhost:3001/api/v1/dlq/${id}/replay`, {
-        method: 'POST',
-        headers: {
-          'x-api-key': 'super_secret_rehook_key_123',
-        },
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setToastMessage(`✅ Replay Triggered for Webhook ${id}! Replay Count: ${data.replay_count}`);
-        fetchDLQ();
-      } else {
-        setToastMessage(`❌ Replay Failed: ${data.message}`);
-      }
+      setReplayingId(id);
+      await replayDlqWebhook(id);
+      toast.success(`Webhook ${id.slice(0, 8)}... replayed successfully!`);
+      loadDlq(false);
     } catch (err: any) {
-      setToastMessage(`❌ Network Error: ${err.message}`);
+      toast.error(`Replay failed: ${err.message}`);
     } finally {
       setReplayingId(null);
     }
   };
 
+  const handleReplayAll = async () => {
+    if (dlqWebhooks.length === 0) return;
+    try {
+      setReplayingAll(true);
+      let successCount = 0;
+      for (const w of dlqWebhooks) {
+        try {
+          await replayDlqWebhook(w.id);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to replay ${w.id}`, e);
+        }
+      }
+      toast.success(`Bulk Replay Complete! ${successCount}/${dlqWebhooks.length} webhooks enqueued.`);
+      loadDlq(true);
+    } catch (err: any) {
+      toast.error(`Bulk Replay Error: ${err.message}`);
+    } finally {
+      setReplayingAll(false);
+    }
+  };
+
   return (
-    <div className="space-y-8">
+    <div className="min-h-screen flex flex-col">
+      <Navbar />
 
-      {/* Page Title Header */}
-      <div className="flex items-center justify-between glass-panel p-6 border-l-4 border-l-rose-500">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-rose-400 flex items-center gap-3">
-            <Skull className="w-6 h-6 text-rose-500" />
-            Dead Letter Queue (DLQ) Inspector
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Webhooks that exhausted maximum retry attempts. Inspect failure traces and trigger manual replays.
-          </p>
-        </div>
-        <button
-          onClick={fetchDLQ}
-          className="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/80 text-xs font-semibold text-slate-200 border border-slate-700/80 flex items-center gap-2 transition-all shadow-sm active:scale-95"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 text-rose-400 ${loading ? 'animate-spin' : ''}`} />
-          Refresh DLQ
-        </button>
-      </div>
-
-      {toastMessage && (
-        <div className="p-4 rounded-xl bg-slate-900 border border-sky-800 text-xs font-mono text-sky-300 flex items-center justify-between shadow-lg">
-          <span>{toastMessage}</span>
-          <button onClick={() => setToastMessage(null)} className="text-slate-500 hover:text-white font-bold px-2 py-1">✕</button>
-        </div>
-      )}
-
-      {/* Dead Webhooks List Container */}
-      <div className="glass-panel overflow-hidden">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
         
-        <div className="p-5 border-b border-slate-800/80 flex items-center justify-between">
-          <h3 className="font-bold text-white text-base">Dead-Lettered Webhook Jobs</h3>
-          <span className="text-xs px-3 py-1 rounded-full bg-rose-950/80 text-rose-300 border border-rose-800/60 font-bold font-mono">
-            {deadWebhooks.length} Jobs Exhausted
-          </span>
-        </div>
-
-        <div className="divide-y divide-slate-800/60">
-          {deadWebhooks.length === 0 ? (
-            <div className="p-12 text-center text-slate-500 space-y-3">
-              <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto" />
-              <p className="text-slate-200 font-bold text-base">No dead-lettered webhooks in DLQ!</p>
-              <p className="text-xs text-slate-400">All webhook deliveries are processing normally without unhandled failures.</p>
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 p-6 rounded-2xl shadow-xl">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-950/80 border border-rose-800/60 flex items-center justify-center shrink-0">
+              <Skull className="w-6 h-6 text-rose-400 shrink-0" />
             </div>
-          ) : (
-            deadWebhooks.map((job) => (
-              <div key={job.id} className="p-6 hover:bg-slate-800/30 transition-colors space-y-4">
-                
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-3">
-                      <span className="px-2.5 py-1 rounded-md bg-rose-950/80 border border-rose-800/60 text-xs font-mono text-rose-300 font-bold">
-                        {job.eventType}
-                      </span>
-                      <span className="text-xs font-mono text-slate-400">ID: {job.id}</span>
-                      {job.replayCount > 0 && (
-                        <span className="text-xs px-2.5 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-800/80 font-bold font-mono">
-                          Replayed {job.replayCount}x
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm font-mono text-slate-200 flex items-center gap-2">
-                      <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                      {job.targetUrl}
-                    </div>
-                  </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white flex items-center gap-2 whitespace-nowrap">
+                <span>Dead Letter Queue (DLQ) Command Center</span>
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Inspect permanently dead-lettered webhooks that exhausted all jitter retry attempts.
+              </p>
+            </div>
+          </div>
 
-                  <button
-                    onClick={() => handleReplay(job.id)}
-                    disabled={replayingId === job.id}
-                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 font-bold text-xs text-white shadow-lg shadow-indigo-500/20 flex items-center gap-2 self-start md:self-auto transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    {replayingId === job.id ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    )}
-                    Replay Webhook
-                  </button>
-                </div>
-
-                {/* Error Trace Snippet */}
-                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs font-mono text-rose-300 flex items-start gap-2.5">
-                  <AlertOctagon className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="text-slate-400 font-semibold">Failure Root Cause: </span>
-                    {job.attempts?.[0]?.errorMessage || 'Exhausted max retry attempts without receiving HTTP 2xx success response.'}
-                  </div>
-                </div>
-
-              </div>
-            ))
-          )}
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => loadDlq(true)}
+              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-800 flex items-center gap-2 transition-all whitespace-nowrap"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-rose-400 shrink-0 ${loading ? 'animate-spin' : ''}`} />
+              <span className="whitespace-nowrap">Refresh DLQ</span>
+            </button>
+            <button
+              onClick={handleReplayAll}
+              disabled={replayingAll || dlqWebhooks.length === 0}
+              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-rose-600/20 active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 shrink-0 ${replayingAll ? 'animate-spin' : ''}`} />
+              <span className="whitespace-nowrap">{replayingAll ? 'Replaying All...' : `Replay All DLQ (${dlqWebhooks.length})`}</span>
+            </button>
+          </div>
         </div>
 
-      </div>
+        {/* Error Alert */}
+        {error && (
+          <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-center gap-3">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
+        {/* DLQ Status Table */}
+        <div className="rounded-2xl bg-slate-900/70 backdrop-blur-xl border border-slate-800/80 overflow-hidden shadow-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              
+              <thead className="bg-slate-950/80 border-b border-slate-800/80 text-slate-400 font-mono uppercase text-[11px] tracking-wider">
+                <tr>
+                  <th className="py-3.5 px-4 font-semibold whitespace-nowrap">Webhook ID</th>
+                  <th className="py-3.5 px-4 font-semibold whitespace-nowrap">Event Type</th>
+                  <th className="py-3.5 px-4 font-semibold whitespace-nowrap">Target URL</th>
+                  <th className="py-3.5 px-4 font-semibold text-center whitespace-nowrap">Attempts</th>
+                  <th className="py-3.5 px-4 font-semibold text-center whitespace-nowrap">Replays</th>
+                  <th className="py-3.5 px-4 font-semibold text-right whitespace-nowrap">Dead Since</th>
+                  <th className="py-3.5 px-4 font-semibold text-center whitespace-nowrap">Replay / Inspect</th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
+                {loading && dlqWebhooks.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-500 animate-pulse">
+                      Checking Dead Letter Queue status...
+                    </td>
+                  </tr>
+                ) : dlqWebhooks.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-16 text-center text-slate-400">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-emerald-950/50 border border-emerald-800/50 flex items-center justify-center shrink-0">
+                          <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                        </div>
+                        <h4 className="font-bold text-base text-slate-200 whitespace-nowrap">Dead Letter Queue is Empty!</h4>
+                        <p className="text-xs text-slate-500 max-w-sm">
+                          All webhooks are being delivered successfully or managed by exponential jitter retries.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  dlqWebhooks.map((w) => {
+                    const targetUrl = w.target_url || w.targetUrl;
+                    const eventType = w.event_type || w.eventType;
+                    const attemptCount = w.attempt_count ?? w.attemptCount ?? 0;
+                    const maxAttempts = w.max_attempts ?? w.maxAttempts ?? 5;
+                    const replayCount = w.replay_count ?? w.replayCount ?? 0;
+
+                    return (
+                      <tr
+                        key={w.id}
+                        onClick={() => setSelectedWebhook(w)}
+                        className="hover:bg-slate-800/40 cursor-pointer transition-colors group"
+                      >
+                        {/* ID */}
+                        <td className="py-3.5 px-4 font-bold text-rose-400 group-hover:underline whitespace-nowrap">
+                          {w.id.slice(0, 8)}...
+                        </td>
+
+                        {/* Event Type */}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded bg-indigo-950/80 border border-indigo-800/60 text-indigo-300 text-[11px] whitespace-nowrap">
+                            {eventType}
+                          </span>
+                        </td>
+
+                        {/* Target URL */}
+                        <td className="py-3.5 px-4 max-w-xs truncate text-slate-400 whitespace-nowrap">
+                          {targetUrl}
+                        </td>
+
+                        {/* Attempts */}
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          <span className="text-rose-400 font-bold">{attemptCount}</span> / {maxAttempts}
+                        </td>
+
+                        {/* Replays */}
+                        <td className="py-3.5 px-4 text-center text-slate-400 whitespace-nowrap">
+                          {replayCount > 0 ? (
+                            <span className="px-2 py-0.5 rounded bg-purple-950/80 border border-purple-800/50 text-purple-300 font-bold whitespace-nowrap">
+                              x{replayCount}
+                            </span>
+                          ) : (
+                            '0'
+                          )}
+                        </td>
+
+                        {/* Timestamp */}
+                        <td className="py-3.5 px-4 text-right text-slate-400 text-[11px] whitespace-nowrap">
+                          {new Date(w.createdAt || w.created_at || Date.now()).toLocaleTimeString()}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleReplaySingle(w.id);
+                              }}
+                              disabled={replayingId === w.id}
+                              className="px-2.5 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-500 disabled:opacity-50 text-white text-[11px] font-bold flex items-center gap-1 transition-all whitespace-nowrap"
+                            >
+                              <Play className={`w-3 h-3 shrink-0 ${replayingId === w.id ? 'animate-spin' : ''}`} />
+                              <span className="whitespace-nowrap">Replay</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedWebhook(w);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all"
+                              title="Inspect Payload"
+                            >
+                              <Eye className="w-3.5 h-3.5 shrink-0" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+
+            </table>
+          </div>
+        </div>
+
+      </main>
+
+      {/* Webhook Inspector Drawer */}
+      <WebhookDrawer
+        webhook={selectedWebhook}
+        onClose={() => setSelectedWebhook(null)}
+        onRefresh={() => loadDlq(false)}
+      />
     </div>
   );
 }
