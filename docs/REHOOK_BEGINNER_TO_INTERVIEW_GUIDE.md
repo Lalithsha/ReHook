@@ -210,7 +210,7 @@ flowchart LR
 4. `worker` without a public port.
 5. `web` on `3000`.
 
-Important implementation detail: [`server.ts`](../apps/api/src/server.ts) imports `workers/init.ts`, so the API process itself starts workers. Compose also starts a separate worker service. That gives two worker pools. It demonstrates horizontal consumers, but a cleaner production separation would let the API process serve only HTTP and let dedicated worker deployments consume jobs.
+The API and worker have separate entrypoints. [`server.ts`](../apps/api/src/server.ts) serves HTTP only, while the dedicated `worker` service runs `workers/init.ts` and consumes BullMQ jobs. This keeps API and delivery capacity independently scalable.
 
 ---
 
@@ -390,11 +390,10 @@ Source: [`apps/api/src/server.ts`](../apps/api/src/server.ts)
 |---|---|---|
 | 1 | imports the configured Express app | separates app construction from listening, useful for tests |
 | 2 | imports environment config | centralizes port and infrastructure names |
-| 3 | imports worker initialization for side effects | starts BullMQ consumers in this process |
-| 5 | calls `app.listen(config.port)` | opens the TCP server |
-| 6–13 | logs useful local URLs | developer feedback only |
+| 4 | calls `app.listen(config.port)` | opens the TCP server without starting background consumers |
+| 5–12 | logs useful local URLs | developer feedback only |
 
-An import “for side effects” means the imported file runs even though no symbol is referenced.
+Workers use the separate `workers/init.ts` entrypoint, which the Compose `worker` service starts.
 
 ## 6.2 `app.ts`, line by line
 
@@ -1111,7 +1110,7 @@ Prometheus types:
 - **Gauge:** can rise/fall, good for queue depth (not implemented).
 - **Histogram:** counts observations in buckets and supports server-side quantiles.
 
-Process topology caveat: `prom-client` stores metrics in process memory. `/metrics` exposes the API process registry. A separate worker container’s delivery counters are not automatically visible there. Because the API currently also starts workers, some worker metrics appear, but metrics from the dedicated worker are missing. Production options include scraping each worker, service discovery, or centralized OpenTelemetry/metrics aggregation.
+Process topology caveat: `prom-client` stores metrics in process memory. `/metrics` exposes only the API process registry, so the separate worker container’s delivery counters are not visible there. Production options include exposing and scraping metrics from each worker, service discovery, or centralized OpenTelemetry/metrics aggregation.
 
 Useful missing metrics:
 
@@ -1266,13 +1265,13 @@ Let:
 | list attempts | `O(log rows + A)` | result size |
 | list webhooks | `O(log rows + W)` plus count | offset becomes costly at large offsets |
 
-Maximum nominal in-process HTTP concurrency is approximately:
+Maximum nominal delivery concurrency is approximately:
 
 ```text
 total worker concurrency = C × P
 ```
 
-With API-embedded worker plus one worker container, this is roughly 20 concurrent jobs, assuming one process in each container. Scaling API replicas unintentionally scales worker consumers too because of the side-effect import.
+With one worker process at the configured concurrency of 10, this is 10 concurrent jobs. Scaling dedicated worker replicas increases delivery concurrency independently; scaling API replicas does not add consumers.
 
 ## 16.1 Scaling dimensions
 
@@ -1312,7 +1311,6 @@ This chapter is not an attack on the project. Recognizing boundaries is senior e
 | arbitrary URL | SSRF/internal network access | HTTPS allowlist, DNS/IP validation, egress proxy |
 | broad CORS/public metrics | data/attack exposure | origin policy, internal metrics network/auth |
 | shallow health always healthy | false readiness | separate liveness/readiness, DB/Redis checks |
-| worker embedded in API and separate worker | topology surprises | independent API and worker entrypoints |
 | process-local metrics | incomplete worker totals | scrape every process or central telemetry |
 | no graceful shutdown | in-flight disruption | close HTTP, worker, Redis, Prisma on signals |
 | response body stored | sensitive data/storage growth | redaction, classification, retention TTL |
@@ -1529,4 +1527,3 @@ accept -> persist -> schedule -> coordinate -> authenticate delivery
 ```
 
 If that sentence is clear, the individual features stop looking like unrelated buzzwords. Each one controls a specific failure boundary in the same end-to-end lifecycle.
-
