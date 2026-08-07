@@ -73,6 +73,7 @@ export const deliveryWorker = new Worker<WebhookJobData>(
     
     headers['Content-Type'] = 'application/json';
     headers['User-Agent'] = 'ReHook-Engine/1.0';
+    headers['X-ReHook-Delivery-ID'] = crypto.randomUUID();
 
     if (webhook.endpointId) {
       const endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: webhook.endpointId } });
