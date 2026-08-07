@@ -5,11 +5,12 @@ import { prisma } from '../db/index.js';
 import { DistributedCircuitBreaker } from '../services/circuitBreaker.service.js';
 import { buildSignatureHeader } from '../utils/crypto.utils.js';
 import { calculateExponentialJitterBackoff } from '../utils/backoff.utils.js';
-import { acquireLock, releaseLock } from '../utils/lock.utils.js';
-import { dlqQueue, deliveryQueue, WebhookJobData } from '../queues/webhook.queue.js';
-import { webhooksDeliveredTotal, deliveryLatencyHistogram } from '../services/telemetry.service.js';
-import { ExecutionStatus, WebhookStatus } from '@prisma/client';
+import { acquireLock, extendLock, releaseLock } from '../utils/lock.utils.js';
+import { WebhookJobData } from '../queues/webhook.queue.js';
+import { webhooksDeliveredTotal, deliveryLatencyHistogram, lockContentionTotal } from '../services/telemetry.service.js';
+import { ExecutionStatus, OutboxQueue, WebhookStatus } from '@prisma/client';
 import crypto from 'crypto';
+import { assertSafeTargetUrl } from '../utils/targetUrl.utils.js';
 
 export const deliveryWorker = new Worker<WebhookJobData>(
   config.retryQueueName,
@@ -30,15 +31,34 @@ export const deliveryWorker = new Worker<WebhookJobData>(
     const currentAttempt = webhook.attemptCount + 1;
     const lockKey = `lock:webhook:${webhookId}:${currentAttempt}`;
     const lockToken = crypto.randomUUID();
+    const lockTtlMs = 30000;
+    let leaseTimer: ReturnType<typeof setInterval> | undefined;
 
     // Acquire atomic execution lock to prevent duplicate sends under worker failover
-    const acquired = await acquireLock(redisConnection, lockKey, lockToken, 30000);
+    const acquired = await acquireLock(redisConnection, lockKey, lockToken, lockTtlMs);
     if (!acquired) {
+      lockContentionTotal.inc();
       console.warn(`[Worker] Concurrency lock active for webhook ${webhookId} attempt ${currentAttempt}. Skipping duplicate execution.`);
       return;
     }
 
     try {
+      leaseTimer = setInterval(() => {
+        void extendLock(redisConnection, lockKey, lockToken, lockTtlMs).then((extended) => {
+          if (!extended) console.error(`[Worker] Lost delivery lease for webhook ${webhookId} attempt ${currentAttempt}`);
+        }).catch((error) => console.error('[Worker] Failed to renew delivery lease', error));
+      }, Math.floor(lockTtlMs / 3));
+      leaseTimer.unref();
+      const claimed = await prisma.webhook.updateMany({
+        where: {
+          id: webhookId,
+          attemptCount: webhook.attemptCount,
+          status: { in: [WebhookStatus.pending, WebhookStatus.retrying] },
+        },
+        data: { status: WebhookStatus.processing, attemptCount: currentAttempt },
+      });
+      if (claimed.count !== 1) return;
+
       const targetUrl = webhook.targetUrl;
       const circuitBreaker = new DistributedCircuitBreaker(targetUrl);
 
@@ -48,21 +68,30 @@ export const deliveryWorker = new Worker<WebhookJobData>(
       console.warn(`[Worker] Circuit Breaker OPEN for target URL: ${targetUrl}. Re-queuing webhook ${webhookId}...`);
       
       const backoffDelay = calculateExponentialJitterBackoff(webhook.attemptCount + 1, 15000);
-      
-      await prisma.deliveryAttempt.create({
-        data: {
-          webhookId,
-          attemptNumber: webhook.attemptCount + 1,
-          executionStatus: ExecutionStatus.circuit_open,
-          errorMessage: 'Circuit breaker is OPEN for target host',
-        },
-      });
-
-      await deliveryQueue.add(
-        'deliver-webhook',
-        { webhookId },
-        { delay: backoffDelay }
-      );
+      const exhausted = currentAttempt >= webhook.maxAttempts;
+      const nextAttemptAt = new Date(Date.now() + backoffDelay);
+      await prisma.$transaction([
+        prisma.deliveryAttempt.create({
+          data: {
+            webhookId,
+            deliveryId: crypto.randomUUID(),
+            attemptNumber: currentAttempt,
+            executionStatus: ExecutionStatus.circuit_open,
+            errorMessage: 'Circuit breaker is OPEN for target host',
+          },
+        }),
+        prisma.webhook.update({
+          where: { id: webhookId },
+          data: { status: exhausted ? WebhookStatus.dead : WebhookStatus.retrying, nextAttemptAt: exhausted ? null : nextAttemptAt },
+        }),
+        prisma.outboxEvent.create({
+          data: {
+            webhookId,
+            queue: exhausted ? OutboxQueue.dlq : OutboxQueue.delivery,
+            availableAt: exhausted ? new Date() : nextAttemptAt,
+          },
+        }),
+      ]);
       return;
     }
 
@@ -73,7 +102,9 @@ export const deliveryWorker = new Worker<WebhookJobData>(
     
     headers['Content-Type'] = 'application/json';
     headers['User-Agent'] = 'ReHook-Engine/1.0';
-    headers['X-ReHook-Delivery-ID'] = crypto.randomUUID();
+    headers['X-ReHook-Event-ID'] = webhook.id;
+    const deliveryId = crypto.randomUUID();
+    headers['X-ReHook-Delivery-ID'] = deliveryId;
 
     if (webhook.endpointId) {
       const endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: webhook.endpointId } });
@@ -92,23 +123,14 @@ export const deliveryWorker = new Worker<WebhookJobData>(
       }
     }
 
-    const currentAttempt = webhook.attemptCount + 1;
     let statusCode: number | undefined;
     let responseText = '';
     let isSuccess = false;
     let errorMessage: string | undefined;
     let executionStatus: ExecutionStatus = ExecutionStatus.failure;
 
-    // Update status to processing
-    await prisma.webhook.update({
-      where: { id: webhookId },
-      data: {
-        status: WebhookStatus.processing,
-        attemptCount: currentAttempt,
-      },
-    });
-
     try {
+      await assertSafeTargetUrl(targetUrl);
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
@@ -119,6 +141,7 @@ export const deliveryWorker = new Worker<WebhookJobData>(
         headers,
         body: payloadBody,
         signal: controller.signal,
+        redirect: 'error',
       });
 
       clearTimeout(timeoutId);
@@ -147,6 +170,7 @@ export const deliveryWorker = new Worker<WebhookJobData>(
     await prisma.deliveryAttempt.create({
       data: {
         webhookId,
+        deliveryId,
         attemptNumber: currentAttempt,
         statusCode,
         responseBody: responseText,
@@ -175,14 +199,10 @@ export const deliveryWorker = new Worker<WebhookJobData>(
       if (currentAttempt >= webhook.maxAttempts) {
         // Max attempts reached -> Move to Dead Letter Queue (DLQ)
         webhooksDeliveredTotal.inc({ status: 'dead' });
-        await prisma.webhook.update({
-          where: { id: webhookId },
-          data: {
-            status: WebhookStatus.dead,
-          },
-        });
-
-        await dlqQueue.add('dlq-webhook', { webhookId }, { jobId: `dlq-${webhookId}` });
+        await prisma.$transaction([
+          prisma.webhook.update({ where: { id: webhookId }, data: { status: WebhookStatus.dead, nextAttemptAt: null } }),
+          prisma.outboxEvent.create({ data: { webhookId, queue: OutboxQueue.dlq } }),
+        ]);
         console.error(`[Worker] Webhook ${webhookId} exhausted all ${webhook.maxAttempts} attempts. Moved to DLQ.`);
       } else {
         // Schedule next retry with exponential backoff & jitter
@@ -190,23 +210,20 @@ export const deliveryWorker = new Worker<WebhookJobData>(
         const backoffMs = calculateExponentialJitterBackoff(currentAttempt);
         const nextAttemptDate = new Date(Date.now() + backoffMs);
 
-        await prisma.webhook.update({
-          where: { id: webhookId },
-          data: {
-            status: WebhookStatus.retrying,
-            nextAttemptAt: nextAttemptDate,
-          },
-        });
-
-        await deliveryQueue.add(
-          'deliver-webhook',
-          { webhookId },
-          { delay: backoffMs }
-        );
+        await prisma.$transaction([
+          prisma.webhook.update({
+            where: { id: webhookId },
+            data: { status: WebhookStatus.retrying, nextAttemptAt: nextAttemptDate },
+          }),
+          prisma.outboxEvent.create({
+            data: { webhookId, queue: OutboxQueue.delivery, availableAt: nextAttemptDate },
+          }),
+        ]);
         console.warn(`[Worker] Webhook ${webhookId} failed attempt ${currentAttempt}/${webhook.maxAttempts}. Retrying in ${backoffMs}ms`);
       }
     }
     } finally {
+      if (leaseTimer) clearInterval(leaseTimer);
       await releaseLock(redisConnection, lockKey, lockToken).catch(() => {});
     }
   },

@@ -43,6 +43,7 @@ export interface DeliveryAttempt {
 }
 
 export interface RegisterWebhookInput {
+  project_id?: string;
   target_url: string;
   event_type: string;
   payload: Record<string, any>;

@@ -1,6 +1,7 @@
 import { prisma } from '../db/index.js';
 import { WebhookEndpoint } from '@prisma/client';
 import crypto from 'crypto';
+import { assertSafeTargetUrl } from '../utils/targetUrl.utils.js';
 
 export interface CreateEndpointInput {
   project_id: string;
@@ -14,6 +15,7 @@ export class EndpointService {
    * Registers a new webhook endpoint with a signing secret
    */
   static async createEndpoint(input: CreateEndpointInput): Promise<WebhookEndpoint> {
+    await assertSafeTargetUrl(input.target_url);
     const secretV1 = input.secret_v1 || `whsec_${crypto.randomBytes(24).toString('hex')}`;
 
     return prisma.webhookEndpoint.create({
@@ -31,8 +33,8 @@ export class EndpointService {
    * Rotates signing secret for zero-downtime key migration
    * Promotes active secretV1 -> secretV2, assigns new secretV1
    */
-  static async rotateSecret(endpointId: string, newSecret?: string): Promise<WebhookEndpoint | null> {
-    const endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: endpointId } });
+  static async rotateSecret(endpointId: string, projectId: string, newSecret?: string): Promise<WebhookEndpoint | null> {
+    const endpoint = await prisma.webhookEndpoint.findUnique({ where: { id: endpointId, projectId } });
     if (!endpoint) {
       return null;
     }

@@ -1,15 +1,19 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1';
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || 'super_secret_rehook_key_123';
+const PROJECT_ID = process.env.NEXT_PUBLIC_PROJECT_ID || 'default';
 
 export interface WebhookAttempt {
   id: string;
+  deliveryId?: string;
   webhookId: string;
   attemptNumber: number;
   statusCode: number | null;
   responseBody: string | null;
   errorMessage: string | null;
-  executionTimeMs: number;
-  circuitState: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  responseTimeMs?: number | null;
+  executionTimeMs?: number;
+  executionStatus?: 'success' | 'failure' | 'timeout' | 'circuit_open';
+  circuitState?: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
   createdAt: string;
 }
 
@@ -54,6 +58,7 @@ export interface WebhookEndpoint {
 const headers = {
   'Content-Type': 'application/json',
   'x-api-key': API_KEY,
+  'x-project-id': PROJECT_ID,
 };
 
 export async function fetchWebhooks(limit = 50, offset = 0, status?: string): Promise<{ webhooks: WebhookJob[]; total: number }> {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const registerWebhookSchema = z.object({
+  project_id: z.string().min(1).max(64).optional().default('default'),
   target_url: z.string().url({ message: 'target_url must be a valid HTTP/HTTPS URL' }),
   event_type: z.string().min(1, { message: 'event_type is required' }),
   payload: z.record(z.any()),

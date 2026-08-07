@@ -48,10 +48,10 @@ jobs:
       - name: Install Monorepo Dependencies
         run: bun install
 
-      - name: Push Prisma Database Schema
+      - name: Apply Prisma migrations
         env:
           POSTGRES_URL: postgres://postgres:postgres@localhost:5432/rehook
-        run: bun db:push
+        run: bun db:migrate:deploy
 
       - name: Run API Unit, Integration & Concurrency Tests (32 Tests)
         env:

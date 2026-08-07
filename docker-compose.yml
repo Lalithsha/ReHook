@@ -42,11 +42,13 @@ services:
     environment:
       PORT: '3001'
       X_API_KEY: 'super_secret_rehook_key_123'
+      PROJECT_API_KEYS: '{"default":"super_secret_rehook_key_123"}'
       POSTGRES_URL: 'postgres://postgres:postgres@postgres:5432/rehook'
       REDIS_URL: 'redis://redis:6379'
       RETRY_QUEUE_NAME: 'rehook-delivery-queue'
       DLQ_QUEUE_NAME: 'rehook-dlq-queue'
       NODE_ENV: 'development'
+      ALLOW_PRIVATE_WEBHOOK_TARGETS: 'true'
     volumes:
       - ./apps/api/src:/app/apps/api/src
     depends_on:
@@ -55,6 +57,11 @@ services:
       redis:
         condition: service_healthy
     command: sh -c "bun db:push && bun --watch src/server.ts"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3001/api/ready').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # 4. ReHook BullMQ Delivery Worker Engine (Alpine Bun - Live Hot Reload)
   worker:
@@ -62,6 +69,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: always
+    ports:
+      - '9464:9464'
     environment:
       PORT: '3001'
       X_API_KEY: 'super_secret_rehook_key_123'
@@ -70,12 +79,17 @@ services:
       RETRY_QUEUE_NAME: 'rehook-delivery-queue'
       DLQ_QUEUE_NAME: 'rehook-dlq-queue'
       NODE_ENV: 'development'
+      WORKER_METRICS_PORT: '9464'
+      OUTBOX_POLL_INTERVAL_MS: '500'
+      ALLOW_PRIVATE_WEBHOOK_TARGETS: 'true'
     volumes:
       - ./apps/api/src:/app/apps/api/src
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      api:
         condition: service_healthy
     command: bun --watch src/workers/init.ts
 
@@ -91,6 +105,7 @@ services:
       WATCHPACK_POLLING: 'true'
       NEXT_PUBLIC_API_URL: 'http://localhost:3001/api/v1'
       NEXT_PUBLIC_API_KEY: 'super_secret_rehook_key_123'
+      NEXT_PUBLIC_PROJECT_ID: 'default'
     volumes:
       - ./apps/web:/app/apps/web
     depends_on:

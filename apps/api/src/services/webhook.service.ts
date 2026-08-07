@@ -1,7 +1,9 @@
 import { prisma } from '../db/index.js';
-import { deliveryQueue, dlqQueue } from '../queues/webhook.queue.js';
 import { RegisterWebhookInput } from '../types/index.js';
-import { Webhook, WebhookStatus } from '@prisma/client';
+import { OutboxQueue, Webhook, WebhookStatus } from '@prisma/client';
+import { assertSafeTargetUrl } from '../utils/targetUrl.utils.js';
+
+export class InvalidWebhookTransitionError extends Error {}
 
 export class WebhookService {
   /**
@@ -9,44 +11,47 @@ export class WebhookService {
    */
   static async registerWebhook(input: RegisterWebhookInput): Promise<Webhook> {
     const maxAttempts = input.retry_config?.max_attempts || 5;
+    const initialDelayMs = input.retry_config?.initial_delay_ms || 5000;
+    const projectId = input.project_id || 'default';
+    await assertSafeTargetUrl(input.target_url);
 
     // Check if target endpoint has active signing keys stored
     const endpoint = await prisma.webhookEndpoint.findFirst({
-      where: { targetUrl: input.target_url, status: 'active' },
+      where: { projectId, targetUrl: input.target_url, status: 'active' },
     });
 
-    const webhook = await prisma.webhook.create({
-      data: {
-        endpointId: endpoint ? endpoint.id : null,
-        targetUrl: input.target_url,
-        eventType: input.event_type,
-        payload: input.payload,
-        headers: input.headers || {},
-        meta: input.meta || {},
-        status: WebhookStatus.pending,
-        maxAttempts,
-        attemptCount: 0,
-        replayCount: 0,
-        nextAttemptAt: new Date(),
-      },
+    return prisma.$transaction(async (tx) => {
+      const availableAt = new Date(Date.now() + initialDelayMs);
+      const webhook = await tx.webhook.create({
+        data: {
+          projectId,
+          endpointId: endpoint ? endpoint.id : null,
+          targetUrl: input.target_url,
+          eventType: input.event_type,
+          payload: input.payload,
+          headers: input.headers || {},
+          meta: input.meta || {},
+          status: WebhookStatus.pending,
+          maxAttempts,
+          initialDelayMs,
+          attemptCount: 0,
+          replayCount: 0,
+          nextAttemptAt: availableAt,
+        },
+      });
+      await tx.outboxEvent.create({
+        data: { webhookId: webhook.id, queue: OutboxQueue.delivery, availableAt },
+      });
+      return webhook;
     });
-
-    // Enqueue into BullMQ with instant execution
-    await deliveryQueue.add(
-      'deliver-webhook',
-      { webhookId: webhook.id },
-      { jobId: `webhook-${webhook.id}` }
-    );
-
-    return webhook;
   }
 
   /**
    * Gets current webhook delivery status & attempts log
    */
-  static async getWebhookById(id: string): Promise<Webhook | null> {
+  static async getWebhookById(id: string, projectId = 'default'): Promise<Webhook | null> {
     return prisma.webhook.findUnique({
-      where: { id },
+      where: { id, projectId },
       include: {
         attempts: {
           orderBy: { attemptNumber: 'asc' },
@@ -58,8 +63,8 @@ export class WebhookService {
   /**
    * Gets all webhooks with optional status filter & pagination (for Dashboard)
    */
-  static async getWebhooks(limit = 50, offset = 0, status?: WebhookStatus) {
-    const where = status ? { status } : {};
+  static async getWebhooks(limit = 50, offset = 0, status?: WebhookStatus, projectId = 'default') {
+    const where = status ? { status, projectId } : { projectId };
     const [total, webhooks] = await Promise.all([
       prisma.webhook.count({ where }),
       prisma.webhook.findMany({
@@ -82,16 +87,16 @@ export class WebhookService {
   /**
    * Gets dead-lettered webhooks with pagination
    */
-  static async getDeadLetterWebhooks(limit = 20, offset = 0) {
-    return this.getWebhooks(limit, offset, WebhookStatus.dead);
+  static async getDeadLetterWebhooks(limit = 20, offset = 0, projectId = 'default') {
+    return this.getWebhooks(limit, offset, WebhookStatus.dead, projectId);
   }
 
   /**
    * Gets all delivery attempts for a webhook
    */
-  static async getDeliveryAttempts(webhookId: string) {
+  static async getDeliveryAttempts(webhookId: string, projectId = 'default') {
     return prisma.deliveryAttempt.findMany({
-      where: { webhookId },
+      where: { webhookId, webhook: { projectId } },
       orderBy: { attemptNumber: 'asc' },
     });
   }
@@ -99,31 +104,31 @@ export class WebhookService {
   /**
    * Replays a Dead-Lettered webhook manually
    */
-  static async replayDlqWebhook(webhookId: string): Promise<Webhook | null> {
-    const webhook = await prisma.webhook.findUnique({ where: { id: webhookId } });
+  static async replayDlqWebhook(webhookId: string, projectId = 'default'): Promise<Webhook | null> {
+    const webhook = await prisma.webhook.findUnique({ where: { id: webhookId, projectId } });
     if (!webhook) {
       return null;
     }
 
-    // Reset attempts, increment replayCount, and update status to pending
-    const updatedWebhook = await prisma.webhook.update({
-      where: { id: webhookId },
-      data: {
-        status: WebhookStatus.pending,
-        attemptCount: 0,
-        replayCount: { increment: 1 },
-        nextAttemptAt: new Date(),
-      },
+    if (webhook.status !== WebhookStatus.dead) {
+      throw new InvalidWebhookTransitionError(`Only dead webhooks can be replayed; current status is ${webhook.status}`);
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const transitioned = await tx.webhook.updateMany({
+        where: { id: webhookId, status: WebhookStatus.dead },
+        data: {
+          status: WebhookStatus.pending,
+          attemptCount: 0,
+          replayCount: { increment: 1 },
+          nextAttemptAt: new Date(),
+        },
+      });
+      if (transitioned.count !== 1) {
+        throw new InvalidWebhookTransitionError('Webhook state changed before replay could be scheduled');
+      }
+      await tx.outboxEvent.create({ data: { webhookId, queue: OutboxQueue.delivery } });
+      return tx.webhook.findUniqueOrThrow({ where: { id: webhookId } });
     });
-
-    // Remove from DLQ if present and push back into primary delivery queue
-    await dlqQueue.remove(`dlq-${webhookId}`).catch(() => {});
-    await deliveryQueue.add(
-      'deliver-webhook',
-      { webhookId },
-      { jobId: `webhook-replay-${webhookId}-${Date.now()}` }
-    );
-
-    return updatedWebhook;
   }
 }

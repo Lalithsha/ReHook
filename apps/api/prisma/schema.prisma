@@ -28,6 +28,16 @@ enum ExecutionStatus {
   circuit_open
 }
 
+enum OutboxStatus {
+  pending
+  published
+}
+
+enum OutboxQueue {
+  delivery
+  dlq
+}
+
 model WebhookEndpoint {
   id          String         @id @default(uuid())
   projectId   String         @map("project_id") @db.VarChar(64)
@@ -46,31 +56,36 @@ model WebhookEndpoint {
 }
 
 model Webhook {
-  id            String         @id @default(uuid())
-  endpointId    String?        @map("endpoint_id")
-  targetUrl     String         @map("target_url") @db.Text
-  eventType     String         @map("event_type") @db.VarChar(100)
-  payload       Json
-  headers       Json?          @default("{}")
-  meta          Json?          @default("{}")
-  status        WebhookStatus  @default(pending)
-  maxAttempts   Int            @default(5) @map("max_attempts")
-  attemptCount  Int            @default(0) @map("attempt_count")
-  replayCount   Int            @default(0) @map("replay_count")
-  nextAttemptAt DateTime?      @map("next_attempt_at") @db.Timestamptz
-  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  id             String        @id @default(uuid())
+  projectId      String        @default("default") @map("project_id") @db.VarChar(64)
+  endpointId     String?       @map("endpoint_id")
+  targetUrl      String        @map("target_url") @db.Text
+  eventType      String        @map("event_type") @db.VarChar(100)
+  payload        Json
+  headers        Json?         @default("{}")
+  meta           Json?         @default("{}")
+  status         WebhookStatus @default(pending)
+  maxAttempts    Int           @default(5) @map("max_attempts")
+  initialDelayMs Int           @default(5000) @map("initial_delay_ms")
+  attemptCount   Int           @default(0) @map("attempt_count")
+  replayCount    Int           @default(0) @map("replay_count")
+  nextAttemptAt  DateTime?     @map("next_attempt_at") @db.Timestamptz
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
-  endpoint WebhookEndpoint? @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-  attempts DeliveryAttempt[]
+  endpoint     WebhookEndpoint?  @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  attempts     DeliveryAttempt[]
+  outboxEvents OutboxEvent[]
 
   @@index([status, nextAttemptAt], name: "idx_webhooks_status_next_attempt")
   @@index([endpointId], name: "idx_webhooks_endpoint")
+  @@index([projectId], name: "idx_webhooks_project")
   @@map("webhooks")
 }
 
 model DeliveryAttempt {
   id              String          @id @default(uuid())
+  deliveryId      String          @default(dbgenerated("gen_random_uuid()")) @map("delivery_id") @db.Uuid
   webhookId       String          @map("webhook_id")
   attemptNumber   Int             @map("attempt_number")
   statusCode      Int?            @map("status_code")
@@ -82,6 +97,25 @@ model DeliveryAttempt {
 
   webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
 
+  @@index([deliveryId], name: "idx_delivery_attempt_delivery_id")
   @@index([webhookId], name: "idx_delivery_attempts_webhook")
   @@map("delivery_attempts")
+}
+
+model OutboxEvent {
+  id          String       @id @default(uuid())
+  webhookId   String       @map("webhook_id")
+  queue       OutboxQueue  @default(delivery)
+  status      OutboxStatus @default(pending)
+  availableAt DateTime     @default(now()) @map("available_at") @db.Timestamptz
+  publishedAt DateTime?    @map("published_at") @db.Timestamptz
+  attempts    Int          @default(0)
+  lastError   String?      @map("last_error") @db.Text
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt], name: "idx_outbox_status_available")
+  @@map("outbox_events")
 }

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { registerWebhookSchema } from '../validators/webhook.validator.js';
-import { WebhookService } from '../../services/webhook.service.js';
+import { InvalidWebhookTransitionError, WebhookService } from '../../services/webhook.service.js';
 import { webhooksIngestedTotal, register as prometheusRegister } from '../../services/telemetry.service.js';
 import { WebhookStatus } from '@prisma/client';
 
@@ -20,7 +20,8 @@ export class WebhookController {
         return;
       }
 
-      const webhook = await WebhookService.registerWebhook(parseResult.data);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const webhook = await WebhookService.registerWebhook({ ...parseResult.data, project_id: projectId });
       webhooksIngestedTotal.inc();
 
       res.status(202).json({
@@ -51,7 +52,8 @@ export class WebhookController {
         ? (statusParam as WebhookStatus)
         : undefined;
 
-      const result = await WebhookService.getWebhooks(limit, offset, status);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const result = await WebhookService.getWebhooks(limit, offset, status, projectId);
       res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: 'Internal Server Error', message: error.message });
@@ -64,7 +66,8 @@ export class WebhookController {
   static async getWebhookStatus(req: Request, res: Response): Promise<void> {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const webhook = await WebhookService.getWebhookById(id);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const webhook = await WebhookService.getWebhookById(id, projectId);
 
       if (!webhook) {
         res.status(404).json({ error: 'Not Found', message: 'Webhook not found' });
@@ -94,7 +97,8 @@ export class WebhookController {
   static async getWebhookAttempts(req: Request, res: Response): Promise<void> {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const attempts = await WebhookService.getDeliveryAttempts(id);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const attempts = await WebhookService.getDeliveryAttempts(id, projectId);
       res.json({
         webhook_id: id,
         total_attempts: attempts.length,
@@ -113,7 +117,8 @@ export class WebhookController {
       const limit = parseInt((req.query.limit as string) || '20', 10);
       const offset = parseInt((req.query.offset as string) || '0', 10);
 
-      const result = await WebhookService.getDeadLetterWebhooks(limit, offset);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const result = await WebhookService.getDeadLetterWebhooks(limit, offset, projectId);
       res.json({
         message: 'Retrieved dead-lettered webhooks successfully',
         ...result,
@@ -129,7 +134,8 @@ export class WebhookController {
   static async getDlqWebhookById(req: Request, res: Response): Promise<void> {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const webhook = await WebhookService.getWebhookById(id);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const webhook = await WebhookService.getWebhookById(id, projectId);
 
       if (!webhook || webhook.status !== WebhookStatus.dead) {
         res.status(404).json({ error: 'Not Found', message: 'Dead-lettered webhook not found' });
@@ -148,7 +154,8 @@ export class WebhookController {
   static async replayDlqWebhook(req: Request, res: Response): Promise<void> {
     try {
       const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-      const webhook = await WebhookService.replayDlqWebhook(id);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const webhook = await WebhookService.replayDlqWebhook(id, projectId);
 
       if (!webhook) {
         res.status(404).json({ error: 'Not Found', message: 'Webhook not found' });
@@ -161,6 +168,10 @@ export class WebhookController {
         replay_count: webhook.replayCount,
       });
     } catch (error: any) {
+      if (error instanceof InvalidWebhookTransitionError) {
+        res.status(409).json({ error: 'Conflict', message: error.message });
+        return;
+      }
       res.status(500).json({ error: 'Internal Server Error', message: error.message });
     }
   }

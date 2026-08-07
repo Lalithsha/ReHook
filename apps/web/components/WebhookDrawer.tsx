@@ -270,9 +270,15 @@ export default function WebhookDrawer({ webhook, onClose, onRefresh }: WebhookDr
                           </span>
                         </div>
                         <span className="text-[11px] text-slate-400">
-                          {attempt.executionTimeMs}ms • Circuit: <code className="text-slate-300">{attempt.circuitState}</code>
+                          {attempt.responseTimeMs ?? attempt.executionTimeMs ?? 0}ms • <code className="text-slate-300">{attempt.executionStatus || attempt.circuitState || 'unknown'}</code>
                         </span>
                       </div>
+
+                      {attempt.deliveryId && (
+                        <div className="text-[10px] text-slate-400 font-mono break-all">
+                          Delivery ID: <code className="text-sky-300">{attempt.deliveryId}</code>
+                        </div>
+                      )}
 
                       {attempt.errorMessage && (
                         <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-900/60 text-rose-300 text-xs font-mono break-all">

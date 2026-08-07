@@ -2,7 +2,7 @@
 
 > **Purpose:** Teach the concepts, runtime flow, implementation, trade-offs, limitations, testing, and interview explanation of this repository from first principles.
 >
-> **Code snapshot reviewed:** Current working tree on 2026-08-02. The existing uncommitted addition of `X-ReHook-Delivery-ID` in `apps/api/src/workers/webhook.worker.ts` is included and was not modified.
+> **Code snapshot reviewed:** Current working tree on 2026-08-08, including the production-hardening work: transactional outbox, stable event identity, persisted delivery identity, project-scoped authentication, guarded replay, SSRF validation, readiness, worker metrics, lease renewal, graceful shutdown, and committed Prisma migrations.
 >
 > **How to use this guide:** Read Chapters 1–5 for the mental model, Chapters 6–15 with the code open, then use Chapters 16–20 for practice and interviews.
 
@@ -67,13 +67,13 @@ save order -> call merchant webhook -> wait 10 seconds -> finish request
 
 If the merchant is slow or offline, the business operation becomes slow or fails. One unreliable external system can therefore damage the upstream system.
 
-ReHook inserts a durable-ish asynchronous boundary:
+ReHook inserts a durable asynchronous acceptance boundary:
 
 ```text
-client -> ReHook API -> PostgreSQL + Redis queue -> 202 Accepted
-                                       |
-                                       v
-                                  worker -> receiver
+client -> ReHook API -> PostgreSQL(webhook + outbox) -> 202 Accepted
+                              |
+                              v
+                    relay -> Redis queue -> worker -> receiver
 ```
 
 The API accepts and records work quickly. A worker performs the unreliable network call separately. This is **decoupling**: ingestion and delivery can proceed at different speeds and fail independently.
@@ -84,8 +84,8 @@ An e-commerce service sends `order.shipped` to a warehouse partner.
 
 1. The e-commerce service calls ReHook.
 2. ReHook validates and records the event.
-3. ReHook enqueues a small job containing only the database ID.
-4. A worker loads the full event from PostgreSQL.
+3. The same database transaction records an outbox event.
+4. The relay enqueues a small job containing only the database ID, then a worker loads the event.
 5. It signs the payload and calls the warehouse.
 6. A `200` response marks it delivered.
 7. A timeout or non-2xx response schedules a randomized retry.
@@ -107,10 +107,10 @@ An e-commerce service sends `order.shipped` to a warehouse partner.
 | Service | Business/data operation behind a controller | `WebhookService.registerWebhook` |
 | ORM | Maps code objects to database rows | Prisma |
 | Queue | Buffer of work waiting for consumers | BullMQ delivery queue |
-| Producer | Adds work to a queue | `WebhookService` |
+| Producer | Adds work to a queue | outbox relay |
 | Consumer/worker | Removes and processes work | `deliveryWorker` |
 | Broker | Infrastructure holding queue state | Redis |
-| Retry | Another attempt after failure | delayed BullMQ job |
+| Retry | Another attempt after failure | due outbox row becomes a BullMQ job |
 | Backoff | Increasing wait between attempts | roughly 5s, 10s, 20s caps |
 | Jitter | Randomness added to the wait | random from zero to the cap |
 | DLQ | Isolation area for exhausted work | logical `dead` rows plus BullMQ DLQ |
@@ -174,15 +174,17 @@ ReHook/
 ```mermaid
 flowchart LR
     U[Upstream client] -->|POST event| API[Express API]
-    API -->|read/write| PG[(PostgreSQL)]
-    API -->|enqueue ID| R[(Redis)]
+    API -->|one transaction: event + outbox| PG[(PostgreSQL)]
+    O[Outbox relay] -->|poll pending rows| PG
+    O -->|stable BullMQ job| R[(Redis)]
     R -->|BullMQ job| W[Delivery worker]
     W -->|load/update| PG
     W -->|lock + circuit state| R
     W -->|signed POST| T[Target receiver]
     W -->|failed permanently| D[DLQ]
     UI[Next.js dashboard] -->|REST calls| API
-    P[Prometheus scraper] -->|GET metrics| API
+    P[Prometheus scraper] -->|:3001 API metrics| API
+    P -->|:9464/metrics| W
 ```
 
 ## 3.3 Why each technology is here
@@ -195,7 +197,7 @@ flowchart LR
 | PostgreSQL | source of business/audit state | relations, indexes, durable transactions | higher latency than memory |
 | Prisma | ORM and generated types | type-safe queries and declarative schema | abstraction/migration tooling overhead |
 | Redis | fast shared coordination | queue, sorted sets, counters, locks | extra dependency and memory constraints |
-| BullMQ | Redis-backed job queue | delayed jobs and worker concurrency | exactly-once is not guaranteed |
+| BullMQ | Redis-backed job queue | job execution and worker concurrency | exactly-once is not guaranteed |
 | Prometheus client | metrics | scrape-based operational measurements | process-local metrics require correct topology |
 | Next.js | operator UI | React dashboard and routing | exposing browser-side credentials is unsafe in production |
 | Docker Compose | local multi-service environment | reproducible startup | not a production orchestrator |
@@ -207,7 +209,7 @@ flowchart LR
 1. `postgres` on `5432`.
 2. `redis` on `6379`.
 3. `api` on `3001`.
-4. `worker` without a public port.
+4. `worker` with a metrics endpoint on `9464`.
 5. `web` on `3000`.
 
 The API and worker have separate entrypoints. [`server.ts`](../apps/api/src/server.ts) serves HTTP only, while the dedicated `worker` service runs `workers/init.ts` and consumes BullMQ jobs. This keeps API and delivery capacity independently scalable.
@@ -223,17 +225,19 @@ sequenceDiagram
     participant C as Client
     participant A as Express API
     participant P as PostgreSQL
+    participant O as Outbox relay
     participant Q as BullMQ/Redis
     participant W as Worker
     participant R as Receiver
 
-    C->>A: POST /api/v1/webhooks + x-api-key
+    C->>A: POST /api/v1/webhooks + x-api-key + optional x-project-id
     A->>A: authenticate, rate-limit, validate
-    A->>P: INSERT webhook(status=pending)
+    A->>P: transaction: INSERT webhook + outbox event
     P-->>A: webhook UUID
-    A->>Q: ADD deliver-webhook {webhookId}
-    Q-->>A: queued
     A-->>C: 202 Accepted + webhook_id
+    O->>P: poll due pending outbox rows
+    O->>Q: ADD {webhookId}, jobId=outbox ID
+    O->>P: mark outbox row published
     Q->>W: deliver job
     W->>P: SELECT webhook
     W->>Q: SET lock NX PX
@@ -250,11 +254,11 @@ sequenceDiagram
         R-->>W: timeout/non-2xx
         W->>P: INSERT failed attempt
         W->>P: status=retrying, nextAttemptAt
-        W->>Q: ADD delayed job
+        W->>P: transaction: status + delayed outbox row
         W->>Q: release lock
     else Final failure
         W->>P: status=dead
-        W->>Q: ADD DLQ job
+        W->>P: transaction: dead + DLQ outbox row
         W->>Q: release lock
     end
 ```
@@ -299,7 +303,7 @@ stateDiagram-v2
     pending --> processing: worker begins HTTP attempt
     processing --> delivered: target returns 2xx
     processing --> retrying: failure and attempts remain
-    retrying --> processing: delayed job runs
+    retrying --> processing: relay publishes due outbox row
     processing --> dead: final attempt fails
     dead --> pending: manual replay
 ```
@@ -333,14 +337,14 @@ No sender-side lock can determine whether step 1 happened. The receiver must be 
 
 ## 5.2 Idempotency practice
 
-The current worker creates a new `X-ReHook-Delivery-ID` using `crypto.randomUUID()` for every attempt. That identifies the attempt, not a stable event. A receiver cannot deduplicate retries by that changing value.
-
-A production approach typically sends both:
+The worker sends both identities needed for correct receiver behavior:
 
 ```http
 X-ReHook-Event-ID: <stable webhook.id across retries>
-X-ReHook-Delivery-ID: <unique attempt id>
+X-ReHook-Delivery-ID: <unique execution/attempt id, persisted in DeliveryAttempt>
 ```
+
+The stable event ID is the receiver's idempotency key. The delivery ID distinguishes individual tries for debugging and audit; it must not be used to deduplicate the logical event because it changes on every execution.
 
 Receiver pseudocode:
 
@@ -356,14 +360,7 @@ return 200
 
 ## 5.3 Acceptance atomicity
 
-Current ingestion performs two separate operations:
-
-1. insert PostgreSQL row;
-2. add Redis queue job.
-
-There is no transaction spanning PostgreSQL and Redis. If the database insert succeeds but queue insertion fails, the API returns `500`, yet a `pending` row remains without a queued job. This is the **dual-write problem**.
-
-A production solution is the **transactional outbox pattern**:
+ReHook implements the **transactional outbox pattern**. Acceptance performs one PostgreSQL transaction that writes both the webhook and a pending outbox event. The API can therefore return `202` without requiring Redis to be available at that instant.
 
 ```text
 single PostgreSQL transaction:
@@ -371,12 +368,12 @@ single PostgreSQL transaction:
   insert outbox row
 
 outbox relay:
-  read unprocessed outbox rows
-  enqueue with stable job ID
-  mark outbox row published
+  poll due pending outbox rows
+  enqueue with job ID derived from outbox row ID
+  mark the row published after BullMQ accepts it
 ```
 
-That converts a cross-system atomicity problem into a recoverable relay problem.
+If Redis is unavailable, the row remains pending and the relay retries later. A crash after queue publication but before marking the row published can republish; the stable BullMQ job ID makes that repeat idempotent while the job exists. This converts cross-system atomicity into a recoverable, observable relay problem rather than claiming a distributed transaction.
 
 ---
 
@@ -388,10 +385,10 @@ Source: [`apps/api/src/server.ts`](../apps/api/src/server.ts)
 
 | Lines | What happens | Why |
 |---|---|---|
-| 1 | imports the configured Express app | separates app construction from listening, useful for tests |
-| 2 | imports environment config | centralizes port and infrastructure names |
-| 4 | calls `app.listen(config.port)` | opens the TCP server without starting background consumers |
-| 5–12 | logs useful local URLs | developer feedback only |
+| 1–4 | import the app, configuration, Prisma, and Redis | resources needed for serving and shutdown |
+| 6–15 | call `app.listen(config.port)` and log local URLs | opens HTTP without embedding consumers |
+| 17–27 | idempotent shutdown closes HTTP, Prisma, and Redis, with a 15-second hard deadline | drains requests and avoids hanging deployment termination |
+| 29–30 | handle `SIGTERM` and `SIGINT` once | supports containers and local interruption |
 
 Workers use the separate `workers/init.ts` entrypoint, which the Compose `worker` service starts.
 
@@ -401,14 +398,12 @@ Source: [`apps/api/src/app.ts`](../apps/api/src/app.ts)
 
 | Lines | Explanation |
 |---|---|
-| 1–4 | import Express, CORS, Helmet, and the versioned router |
-| 6 | instantiate the app |
-| 8 | Helmet adds defensive HTTP headers |
-| 9 | CORS currently allows broad cross-origin access by default |
-| 10 | parse JSON bodies and reject bodies over 5 MB |
-| 13–19 | shallow public health response; it does not check DB/Redis |
-| 22 | mount router under `/api/v1` |
-| 25–27 | return JSON 404 for unmatched routes |
+| 1–6 | import HTTP middleware, routes, Prisma, and Redis |
+| 8–12 | instantiate Express, add Helmet/broad CORS, and limit JSON to 5 MB |
+| 14–21 | public liveness endpoint reports that the process can answer HTTP |
+| 23–40 | readiness checks PostgreSQL and a Redis ping bounded to 500 ms; failures return `503` |
+| 42–43 | mount routes under `/api/v1` |
+| 45–48 | return JSON `404` for unmatched routes |
 
 Order matters: middleware registered earlier runs earlier.
 
@@ -421,6 +416,9 @@ Source: [`apps/api/src/configs/env.config.ts`](../apps/api/src/configs/env.confi
 - `X_API_KEY` has a demo default.
 - `POSTGRES_URL` and `REDIS_URL` select infrastructure.
 - queue names allow environment separation.
+- `PROJECT_API_KEYS` maps project IDs to API keys; `X_API_KEY` remains the default-project fallback.
+- outbox poll/batch settings, worker metrics port, and rate-limit timeout are configurable.
+- production blocks private webhook targets unless explicitly overridden for controlled environments.
 - `NODE_ENV` defaults to development.
 
 Production rule: fail startup when secrets or database URLs are missing. Silent insecure defaults are convenient locally but dangerous in deployment.
@@ -448,6 +446,7 @@ Complete API:
 | Method and path | Purpose | Auth | Rate limited |
 |---|---|---:|---:|
 | `GET /api/health` | shallow liveness | no | no |
+| `GET /api/ready` | PostgreSQL + bounded Redis readiness | no | no |
 | `GET /api/v1/metrics` | Prometheus text | no | no |
 | `POST /api/v1/webhooks` | accept event | yes | yes |
 | `GET /api/v1/webhooks` | page/filter events | yes | no |
@@ -464,14 +463,14 @@ Complete API:
 
 Source: [`webhook.validator.ts`](../apps/api/src/api/validators/webhook.validator.ts)
 
-- `target_url` must be syntactically a URL. It is not restricted to HTTPS or protected from SSRF.
+- `target_url` must be HTTP(S), must not contain embedded credentials, and is DNS-resolved before acceptance and again before delivery. Production rejects loopback, private, link-local, multicast, unspecified, and other non-public addresses; redirects are rejected.
 - `event_type` must be nonempty.
 - `payload` must be an object/record.
 - custom headers must have string values.
 - `max_attempts` is 1–20, default 5.
 - `initial_delay_ms` is 100–86,400,000, default 5,000.
 
-Important: `initial_delay_ms` is validated but not stored or used by the worker. This is currently an API/implementation mismatch.
+`initial_delay_ms` is persisted and becomes the initial outbox event's `availableAt` time, so the first delivery is not published before that delay. Later retries use the exponential full-jitter helper.
 
 `safeParse` returns a success/error result instead of throwing. Controllers turn validation failures into `400 Bad Request` and call `.flatten()` to produce field errors.
 
@@ -537,17 +536,19 @@ Do not confuse overall webhook status with individual attempt status.
 | `meta` | internal/user metadata not sent by worker |
 | `status` | overall lifecycle |
 | `maxAttempts` | retry budget |
+| `initialDelayMs` | persisted delay before initial publication |
 | `attemptCount` | executed HTTP attempts |
 | `replayCount` | operator replay count |
 | `nextAttemptAt` | informational scheduled retry time |
 | timestamps | audit/ordering |
 
-The composite `[status, nextAttemptAt]` index is useful for queries that search scheduled states, although the present worker relies on BullMQ delayed jobs rather than polling this index.
+The composite `[status, nextAttemptAt]` index supports status/schedule inspection. Actual retry publication is driven by the matching outbox row's indexed `availableAt`, which the relay polls.
 
 ## 7.5 `DeliveryAttempt`
 
 Each row is an audit record for one execution decision:
 
+- unique `deliveryId`, also sent as `X-ReHook-Delivery-ID`;
 - attempt number;
 - HTTP status if received;
 - first 1,000 characters of response;
@@ -558,7 +559,19 @@ Each row is an audit record for one execution decision:
 
 The foreign key uses `onDelete: Cascade`: deleting a webhook deletes its attempts. Deleting an endpoint also cascades related webhooks because the webhook relation specifies cascade. There is currently no delete API.
 
-## 7.6 Why normalize attempts?
+## 7.6 `OutboxEvent`
+
+An outbox row records durable publication intent alongside the webhook state change:
+
+- `queue` selects delivery or DLQ;
+- `status` is `pending` or `published`;
+- `availableAt` supports initial delay and delayed retry publication;
+- `publishedAt`, `attempts`, and `lastError` make relay behavior observable;
+- `[status, availableAt]` indexes the relay's polling query.
+
+Ingestion, retry scheduling, final DLQ transition, and manual replay write their state change and corresponding outbox row in one PostgreSQL transaction.
+
+## 7.7 Why normalize attempts?
 
 Putting attempts in their own table avoids a growing JSON array inside the webhook row and makes audit entries individually queryable. Cost: retrieving a webhook plus attempts needs a relation query/join.
 
@@ -572,7 +585,7 @@ Source: [`webhook.controller.ts`](../apps/api/src/api/controllers/webhook.contro
 
 1. `safeParse(req.body)` validates untrusted JSON.
 2. Invalid input returns `400` and stops with `return`.
-3. `WebhookService.registerWebhook` performs persistence and queueing.
+3. `WebhookService.registerWebhook` validates the destination and transactionally persists the webhook plus outbox event.
 4. Prometheus ingestion counter increments only after service success.
 5. `202` returns the ID and initial status.
 6. Unexpected errors return `500`.
@@ -581,23 +594,27 @@ Why a thin controller? HTTP details stay in the controller; reusable business/da
 
 ## 8.2 Service path, line by line
 
-Source: [`webhook.service.ts`](../apps/api/src/services/webhook.service.ts), lines 10–42.
+Source: [`webhook.service.ts`](../apps/api/src/services/webhook.service.ts), lines 12–47.
 
 | Lines | Explanation |
 |---|---|
-| 11 | choose requested max attempts or 5 |
-| 14–16 | find an active endpoint whose URL exactly matches |
-| 18–32 | insert webhook state into PostgreSQL |
-| 20 | link endpoint when found, enabling signing |
-| 24–25 | store optional headers and metadata as JSON |
-| 26–30 | initialize lifecycle counters/times |
-| 35–39 | enqueue only `{ webhookId }` |
-| 38 | stable initial BullMQ job ID helps reject duplicate initial adds |
-| 41 | return persisted Prisma object |
+| 13–16 | choose retry settings/project and reject an unsafe target URL |
+| 18–21 | find an active endpoint by project plus exact URL |
+| 23–46 | execute one PostgreSQL transaction |
+| 24 | calculate when the initial delivery becomes eligible |
+| 25–41 | insert project-scoped webhook state, including `initialDelayMs` |
+| 42–44 | insert a pending delivery outbox row with the same availability time |
+| 45 | return the persisted webhook |
 
-Only the ID is queued because PostgreSQL remains the authoritative source for mutable details. It also keeps Redis job payloads small. The trade-off is a database query for every job execution.
+The relay later queues only `{ webhookId }` because PostgreSQL remains authoritative and Redis payloads stay small. The trade-off is a database read for every execution.
 
-## 8.3 BullMQ queue configuration
+## 8.3 Outbox relay
+
+Source: [`outbox.service.ts`](../apps/api/src/services/outbox.service.ts)
+
+The dedicated worker process polls due pending rows in bounded batches, selects the delivery or DLQ queue, and publishes with `jobId = outbox-<outbox ID>`. It then conditionally marks the row published. Publication failures increment an error counter and remain pending for a later poll. The same loop refreshes queue-depth and pending-outbox gauges.
+
+## 8.4 BullMQ queue configuration
 
 Source: [`webhook.queue.ts`](../apps/api/src/queues/webhook.queue.ts)
 
@@ -618,9 +635,9 @@ The application has two notions of DLQ:
 
 The database is effectively the operational source of truth. The DLQ worker only logs; it does not repair, notify, or persist anything new.
 
-## 8.4 Why the path is called fast
+## 8.5 Why the path is called fast
 
-The API waits for authentication, Redis limiter commands, validation, a PostgreSQL query, a PostgreSQL insert, and a Redis queue insertion—but not the receiver’s network response or retries. Therefore it is fast relative to synchronous delivery. “Under 15 ms” is a measured/local claim, not a logical guarantee in all deployments.
+The API waits for authentication, a bounded Redis limiter operation, validation/DNS safety checks, an endpoint lookup, and one PostgreSQL transaction—but not Redis queue publication, the receiver response, or retries. Therefore it is fast relative to synchronous delivery and remains able to accept durably while Redis is temporarily unavailable. “Under 15 ms” is a measured/local claim, not a universal guarantee.
 
 ---
 
@@ -630,20 +647,20 @@ Source: [`apps/api/src/workers/webhook.worker.ts`](../apps/api/src/workers/webho
 
 This file is the system’s central orchestrator.
 
-## 9.1 Imports and worker creation (lines 1–16)
+## 9.1 Imports and worker creation (lines 1–17)
 
 - BullMQ `Worker` consumes jobs; `Job` supplies typed job data.
 - Redis is used by BullMQ, circuit breaker, and lock.
 - Prisma reads/writes business state.
 - helpers isolate HMAC, backoff, and lock algorithms.
-- queue objects enable retries and DLQ placement.
+- outbox queue enums represent durable retry/DLQ publication intent.
 - Prometheus records outcomes and latency.
 - Prisma enums prevent arbitrary status strings.
 - `crypto.randomUUID()` creates ownership/delivery tokens.
 
 The worker listens on the configured delivery queue.
 
-## 9.2 Load and guard clauses (lines 17–28)
+## 9.2 Load and guard clauses (lines 18–29)
 
 1. Extract `webhookId` from the tiny job.
 2. Save start time for latency.
@@ -653,7 +670,7 @@ The worker listens on the configured delivery queue.
 
 These early returns are **guard clauses**: they keep the main path less nested.
 
-## 9.3 Lock construction (lines 30–39)
+## 9.3 Lock, lease renewal, and conditional claim (lines 31–60)
 
 `currentAttempt = attemptCount + 1` chooses the next logical attempt.
 
@@ -661,52 +678,48 @@ These early returns are **guard clauses**: they keep the main path less nested.
 lock:webhook:<webhook ID>:<attempt number>
 ```
 
-A random token represents ownership. The worker asks Redis to create the lock only if absent, for 30 seconds. If another worker holds it, this worker exits without sending.
+A random token represents ownership. The worker asks Redis to create the lock only if absent, for 30 seconds. If another worker holds it, this worker records lock contention and exits without sending.
 
-## 9.4 `try/finally` (lines 41 and 209–211)
+While work is active, the owner extends the lease every one-third of the TTL using a token-checking Lua operation. It then conditionally changes the row from `pending`/`retrying` to `processing` only when the observed attempt count still matches. This database compare-and-set prevents a stale queue job from claiming work after state has moved on.
 
-Everything after acquisition runs in `try`. `finally` releases the lock whether the path succeeds, fails, or returns early. This is resource cleanup analogous to closing a file or DB connection.
+## 9.4 `try/finally` cleanup (lines 45–51 and 225–228)
+
+Everything after acquisition runs in `try`. `finally` stops renewal and releases the lock whether the path succeeds, fails, or returns early. This is resource cleanup analogous to closing a file or DB connection.
 
 Release errors are swallowed with `.catch(() => {})`, relying on the TTL to expire the lock.
 
-## 9.5 Circuit decision (lines 42–67)
+## 9.5 Circuit decision (lines 62–96)
 
 1. Build a circuit breaker keyed by target host.
 2. `isAllowed()` permits `CLOSED` or `HALF_OPEN`.
 3. When open, calculate jitter with a 15-second base.
-4. Insert a `circuit_open` audit entry.
-5. Add a delayed job and return.
+4. In one PostgreSQL transaction, insert a `circuit_open` audit row, update webhook state, and write the next delivery or DLQ outbox row.
+5. Return without contacting the receiver.
 
-The open-circuit path deliberately does not increment `attemptCount`, because no receiver call occurred. However, it can create repeated audit rows with the same `attemptNumber`, and it does not update `nextAttemptAt`.
+The conditional claim increments `attemptCount` before the circuit decision, so a circuit-open execution consumes attempt budget and can eventually dead-letter the webhook. It also stores `nextAttemptAt` when another execution remains.
 
-## 9.6 Outbound headers and signing (lines 69–93)
+## 9.6 Outbound identity headers and signing (lines 98–124)
 
 - Convert stored JSON headers to a string map.
 - Force JSON content type.
 - identify the sender as `ReHook-Engine/1.0`.
-- generate an attempt-specific `X-ReHook-Delivery-ID`.
+- set stable `X-ReHook-Event-ID` to the webhook UUID.
+- generate an attempt-specific `X-ReHook-Delivery-ID` that is later persisted in the audit row.
 - if linked endpoint secrets exist, sign the payload.
 - attach signature and timestamp headers.
 
 The worker overwrites conflicting stored values for these system headers. `headers` references the parsed Prisma JSON object for this execution; it is not written back to the database.
 
-## 9.7 Mark processing (lines 95–109)
+## 9.7 Mark processing
 
-The code recomputes/shadows `currentAttempt` inside the `try` block, initializes result variables, and updates the webhook:
+The conditional claim described in 9.3 happens before circuit and HTTP work. Status inspection can therefore show `processing`, while the attempt counter cannot be advanced by two workers that read the same earlier state.
 
-```text
-status = processing
-attemptCount = currentAttempt
-```
+## 9.8 HTTP execution and SSRF revalidation (lines 126–164)
 
-This update happens before the HTTP request so status inspection can show active work.
-
-## 9.8 HTTP execution (lines 111–141)
-
-1. Create an `AbortController`.
-2. Schedule abort after 10 seconds.
+1. Resolve and revalidate the target immediately before delivery.
+2. Create an `AbortController` and schedule abort after 10 seconds.
 3. serialize JSON payload.
-4. `fetch` a POST with headers/body/signal.
+4. `fetch` a POST with headers/body/signal and reject redirects.
 5. cancel timer when a response arrives.
 6. store status and at most 1,000 response characters.
 7. every 2xx (`response.ok`) counts as success.
@@ -715,37 +728,35 @@ This update happens before the HTTP request so status inspection can show active
 
 Nuance: if `fetch` throws, `clearTimeout(timeoutId)` is not called. The timer will eventually fire; a `finally` around the fetch would be cleaner.
 
-## 9.9 Audit and metrics (lines 143–157)
+## 9.9 Audit and metrics (lines 166–181)
 
-Elapsed wall time is observed in seconds because Prometheus metric conventions prefer seconds. Then the worker inserts one delivery-attempt row with all collected fields.
+Elapsed wall time is observed in seconds because Prometheus conventions prefer seconds. Then the worker inserts one delivery-attempt row, including the exact `deliveryId` sent to the receiver.
 
 The histogram includes pre-request work since `startTime` is set before the database read and lock/circuit checks. Its name says “delivery duration,” so this is a defensible but important interpretation.
 
-## 9.10 Success branch (lines 159–170)
+## 9.10 Success branch (lines 183–194)
 
 - reset circuit state/failure counter;
 - increment `rehook_webhooks_delivered_total{status="success"}`;
 - mark webhook `delivered`;
 - log outcome.
 
-## 9.11 Failure/retry/DLQ branch (lines 171–207)
+## 9.11 Failure/retry/DLQ branch (lines 195–224)
 
 Every HTTP/network failure is recorded against the host circuit.
 
 If attempt budget is exhausted:
 
 - metric label `dead` increments;
-- webhook becomes `dead`;
-- stable `dlq-<id>` job is added;
+- webhook becomes `dead` and a DLQ outbox row is created in the same transaction;
 - error is logged.
 
 Otherwise:
 
 - metric label `retrying` increments;
 - jitter delay is calculated;
-- `nextAttemptAt` is stored;
-- status becomes `retrying`;
-- a delayed delivery job is added.
+- `nextAttemptAt` is stored and status becomes `retrying`;
+- a delivery outbox row with matching `availableAt` is created in the same transaction.
 
 BullMQ worker `concurrency: 10` means this process runs up to ten job processors concurrently. Multiple processes multiply total concurrency.
 
@@ -929,13 +940,13 @@ Good phrasing:
 
 ## 12.5 Lock limitations
 
-- no lease renewal;
-- if total protected work exceeds 30 seconds, another worker may acquire it;
+- the lease is renewed while the worker is active, but renewal can still be lost during a long runtime pause or Redis outage;
+- there is no fencing token, so a former owner is not cryptographically prevented from continuing after lease loss;
 - Redis failover semantics can violate exclusivity depending on replication;
 - lock acquisition failure simply returns, trusting another job to finish;
 - a lock reduces concurrent duplication but cannot solve ambiguous HTTP outcomes.
 
-The outbound timeout is 10 seconds, leaving headroom within the 30-second lease, but DB/Redis delays also occur inside the protected section.
+The conditional PostgreSQL claim adds another stale-execution guard, but receiver idempotency remains the final protection against unavoidable network ambiguity.
 
 ---
 
@@ -947,14 +958,14 @@ Sources: [`auth.middleware.ts`](../apps/api/src/middlewares/auth.middleware.ts),
 
 Flow:
 
-1. read `x-api-key`;
-2. reject absent/non-string values with `401`;
-3. compare against configured key;
-4. call `next()` when valid.
+1. read `x-api-key` and optional `x-project-id` (default project when absent);
+2. select the configured key for that project;
+3. reject missing, unknown-project, or invalid credentials with `401`;
+4. attach the authenticated project ID to the request and call `next()`.
 
 `crypto.timingSafeEqual` avoids byte-by-byte early exit for equal-length inputs. The helper first returns when lengths differ, so key length can be inferred; key length normally is not treated as secret. This is safer than ordinary string comparison but only one part of API security.
 
-Current system uses one global API key, not per-user/project keys, roles, expiry, hashing, revocation, or audit ownership.
+The system now scopes API operations and database queries by project, using `PROJECT_API_KEYS` for non-default projects. This is basic tenant isolation, not a complete identity system: keys are still plaintext environment configuration and there are no users, roles, key hashes, expiry, rotation/revocation records, or ownership audit logs.
 
 ## 13.2 Sliding-window rate limiter
 
@@ -978,7 +989,7 @@ Per request, a Redis transaction/pipeline:
 
 Time complexity is approximately `O(log N + M)` for removal/addition where `M` expired items are removed, plus `O(1)` cardinality. Memory is `O(N)` per active key within the window.
 
-The limiter is **fail-open**: if Redis errors, traffic is allowed. This prioritizes availability over protection. Also, the rejected request is inserted before the count check, so repeated rejected traffic remains counted until it ages out.
+The limiter is **fail-open**: Redis work is bounded by a configurable timeout (250 ms by default), and errors/timeouts allow traffic. This prioritizes ingestion availability over protection. Also, the rejected request is inserted before the count check, so repeated rejected traffic remains counted until it ages out.
 
 ## 13.3 HMAC from first principles
 
@@ -1056,12 +1067,12 @@ Missing lifecycle step: there is no finalize endpoint that removes `v2` after th
 - the dashboard API key is in a `NEXT_PUBLIC_*` variable and therefore browser-visible;
 - metrics are public;
 - CORS is broad;
-- arbitrary target URLs create SSRF risk (cloud metadata/private network access);
+- application-layer SSRF checks reduce risk, but DNS rebinding/time-of-check-to-time-of-use and network-policy mistakes still require defense in depth;
 - HTTP URLs are accepted, so signatures/payload can travel without TLS;
 - custom outbound headers could contain sensitive values stored in DB;
 - default demo credentials must never be production credentials.
 
-Production controls: secret manager/envelope encryption, server-side dashboard session, scoped API keys, HTTPS allowlist, DNS/IP revalidation, egress proxy, private-range blocking, payload classification, audit logs, and restricted CORS.
+Production controls still needed: secret manager/envelope encryption, server-side dashboard session, hashed/revocable credentials, HTTPS allowlists where appropriate, controlled egress/network policy, payload classification, audit logs, metrics isolation, and restricted CORS.
 
 ---
 
@@ -1081,19 +1092,17 @@ DLQ enables:
 
 ## 14.2 Replay code path
 
-Source: [`webhook.service.ts`](../apps/api/src/services/webhook.service.ts), lines 102–128.
+Source: [`webhook.service.ts`](../apps/api/src/services/webhook.service.ts), lines 107–132.
 
 1. find webhook or return `null`;
-2. set status `pending`;
-3. reset attempt count to zero;
-4. increment replay count atomically in SQL;
-5. set next time to now;
-6. try to remove stable DLQ job;
-7. enqueue new delivery job with timestamped replay ID.
+2. reject every non-`dead` state with `409 Conflict`;
+3. in a transaction, conditionally update exactly one `dead` row to `pending`;
+4. reset attempt count, increment replay count, and set next time to now;
+5. insert a delivery outbox row in that same transaction.
 
 Audit attempt rows are retained, which is good for history. But attempt numbers restart at 1 after replay, so `(webhookId, attemptNumber)` is not globally unique and timelines should also use `createdAt`/replay generation.
 
-The service currently allows replay of any existing webhook, not only `dead` ones. The route name and UI imply DLQ-only behavior, so production should enforce an allowed state transition in a transaction.
+The conditional update protects against two operators racing to replay the same item: only one `dead -> pending` transition can succeed.
 
 ## 14.3 Metrics
 
@@ -1103,22 +1112,23 @@ Source: [`telemetry.service.ts`](../apps/api/src/services/telemetry.service.ts)
 - `rehook_webhooks_ingested_total` counter;
 - `rehook_webhooks_delivered_total{status=...}` counter;
 - `rehook_delivery_duration_seconds` histogram with fixed buckets.
+- outbox published/failure counters and pending gauge;
+- queue jobs gauge by queue/state;
+- worker lock-contention counter.
 
 Prometheus types:
 
 - **Counter:** only increases; use rates over time.
-- **Gauge:** can rise/fall, good for queue depth (not implemented).
+- **Gauge:** can rise/fall; ReHook uses gauges for queue state and pending outbox rows.
 - **Histogram:** counts observations in buckets and supports server-side quantiles.
 
-Process topology caveat: `prom-client` stores metrics in process memory. `/metrics` exposes only the API process registry, so the separate worker container’s delivery counters are not visible there. Production options include exposing and scraping metrics from each worker, service discovery, or centralized OpenTelemetry/metrics aggregation.
+`prom-client` is process-local, so both processes expose their own registry: API metrics at `/api/v1/metrics` and delivery/outbox/queue metrics from the worker on `:9464/metrics`. Prometheus must scrape every replica; centralized aggregation/service discovery remains deployment work.
 
 Useful missing metrics:
 
-- queue waiting/delayed/active depth;
 - delivery attempts by target/status code class;
 - circuit state/transitions;
 - DLQ size and oldest age;
-- lock contention;
 - time from ingestion to successful delivery;
 - replay success/failure.
 
@@ -1152,13 +1162,14 @@ The dashboard computes several KPIs from the current fetched page, not necessari
 
 ## 15.1 Test inventory
 
-The current repository contains 28 declared tests across 11 files:
+The current repository contains 34 declared tests across 12 files:
 
 | Area | What is tested |
 |---|---|
 | auth | valid, missing, invalid API key |
 | limiter | headers/allow and 429 branch with mock Redis |
 | validator | valid payload, bad URL, missing event type |
+| target URL safety | rejects non-public ranges and allows public IPs |
 | crypto | compare, deterministic HMAC, dual signature |
 | backoff | jitter bounds and cap |
 | lock | acquisition, contention, token-safe release against Redis |
@@ -1172,31 +1183,43 @@ Tests prove only their assertions and environment. They do not by themselves pro
 
 ## 15.2 Verification performed for this guide
 
-On 2026-08-02:
+On 2026-08-08, with PostgreSQL and Redis available:
 
-- `tsc --noEmit` passed.
-- `bun test` without local Redis/PostgreSQL produced **18 pass, 10 fail, 31 runtime errors**.
-- Redis-dependent lock tests timed out because Redis was unavailable.
-- Supertest integration tests failed to bind ephemeral port `0` in this sandbox/runtime.
+- API TypeScript build passed;
+- dashboard production build passed;
+- all **34 API tests passed** with zero failures;
+- Prisma schema validation passed;
+- Docker Compose configuration validation passed;
+- live success, retry/DLQ, guarded replay, cross-project rejection, and Redis-outage outbox recovery flows passed;
+- dashboard smoke testing showed the persisted delivery ID and no browser console errors.
 
-Therefore the repository badge/handbook’s “32 passing” statement was not reproduced in this environment. This is an environment-qualified result, not proof that those tests always fail. Run the suite after starting Docker infrastructure.
+These checks are strong development evidence, not proof of exactly-once delivery, a production SLO, or correctness at arbitrary scale.
 
 ## 15.3 Correct local practice sequence
 
+For the complete containerized stack:
+
 ```bash
-docker compose up -d
 bun install
 bun db:generate
-bun db:push
-bun test:api
-bun mock:receiver
+docker compose up -d --build
 ```
 
-In separate terminals:
+For source-level development, start only infrastructure, apply migrations, and then run each process in its own terminal:
+
+```bash
+docker compose up -d postgres redis
+bun install
+bun db:generate
+bun db:migrate:deploy
+bun test:api
+```
 
 ```bash
 bun dev:api
+bun --cwd apps/api dev:worker
 bun --cwd apps/web dev
+bun mock:receiver
 ```
 
 Dashboard: `http://localhost:3000`; API: `http://localhost:3001`.
@@ -1279,7 +1302,7 @@ With one worker process at the configured concurrency of 10, this is 10 concurre
 - **Delivery scale:** worker replicas/concurrency, receiver limits, DB attempt writes.
 - **Storage scale:** payload size × events, response audit size, retention.
 - **Hot-host scale:** many events for one target share circuit state but have no per-host concurrency limit.
-- **Tenant scale:** one global API key and URL-based endpoint lookup are insufficient isolation.
+- **Tenant scale:** project-scoped keys and query filters provide a first isolation layer; hashed/revocable credentials, RBAC, quotas, and stronger database-level tenant enforcement are still needed.
 
 ## 16.2 Backpressure
 
@@ -1293,33 +1316,27 @@ This chapter is not an attack on the project. Recognizing boundaries is senior e
 
 | Current behavior | Risk | Production improvement |
 |---|---|---|
-| PostgreSQL insert then Redis enqueue | stranded pending row | transactional outbox + relay |
 | at-least-once attempts | duplicate business effects | stable event ID + receiver idempotency |
-| random delivery ID per retry | cannot dedupe event by it | separate stable event and attempt IDs |
 | single Redis lease called Redlock | failover/lease limitations | precise naming, proven quorum/library if justified |
-| fixed 30s lock, no renewal | expiry during slow protected work | lease extension/fencing token or redesign |
+| renewable lease without fencing | former owner may continue after lease loss | fencing token or receiver-side idempotency/conditional effects |
 | half-open allows all | recovery probe burst | atomic probe lease/budget |
 | circuit operations split across commands | races/inconsistent snapshots | Lua/transaction/state versioning |
 | all non-2xx retry | waste on permanent 4xx | retry classifier + `Retry-After` |
-| `initial_delay_ms` ignored | misleading API | persist and pass to backoff |
-| circuit-open rows can repeat attempt number | confusing/unbounded audit | separate decision sequence or unique execution ID |
-| replay accepts any status | invalid transition/race | conditional transactional update `dead -> pending` |
 | endpoint selected by exact URL | ambiguity/duplicates | require endpoint ID, unique tenant-scoped constraint |
 | secret plaintext and returned | credential exposure | KMS/envelope encryption, show once, redaction |
 | no secret-rotation finalization | old key persists | grace deadline + retire endpoint |
-| browser-visible global API key | anyone with UI can extract key | BFF/session auth + scoped server credentials |
-| arbitrary URL | SSRF/internal network access | HTTPS allowlist, DNS/IP validation, egress proxy |
+| browser-visible default API key | anyone with UI can extract key | BFF/session auth + server-held credentials |
+| application-only SSRF checks | DNS rebinding/egress-policy gaps | egress proxy/network policy, optional allowlists |
 | broad CORS/public metrics | data/attack exposure | origin policy, internal metrics network/auth |
-| shallow health always healthy | false readiness | separate liveness/readiness, DB/Redis checks |
-| process-local metrics | incomplete worker totals | scrape every process or central telemetry |
-| no graceful shutdown | in-flight disruption | close HTTP, worker, Redis, Prisma on signals |
+| process-local metric registries | incomplete totals if replicas are missed | scrape every process via discovery or central telemetry |
 | response body stored | sensitive data/storage growth | redaction, classification, retention TTL |
 | no payload retention policy | unbounded DB | archival/deletion policy |
 | offset pagination | slow/deceptive under churn | cursor pagination |
 | `failed` status unused | ambiguous model | remove or define transition |
 | no per-target concurrency limit | overwhelm one receiver | BullMQ groups/custom semaphore |
-| no migrations directory | schema drift governance | committed migrations, not production `db push` |
+| baseline migration with local Compose `db push` | existing environments need an explicit rollout/baseline procedure | production `prisma migrate deploy`, backups, rollback/runbook |
 | queue Redis durability unspecified | possible queued-work loss | AOF/replication/managed Redis + outbox recovery |
+| outbox rows never archived | table/index growth | retention/archive published rows after a safety window |
 
 ## 17.1 A production target architecture
 
@@ -1344,11 +1361,11 @@ flowchart LR
 
 ## 18.1 30-second answer
 
-> “ReHook is an asynchronous webhook delivery platform. An Express API authenticates and rate-limits requests, validates them with Zod, stores event state in PostgreSQL through Prisma, and enqueues a BullMQ job in Redis. Distributed workers sign payloads with HMAC, call receivers with a timeout, record attempt audits and Prometheus metrics, retry transient failures using exponential full jitter, protect unhealthy hosts with a Redis circuit breaker, and move exhausted events to a replayable DLQ. A Next.js dashboard provides operational visibility. Its semantics are at-least-once, so production receivers should be idempotent.”
+> “ReHook is an asynchronous webhook delivery platform. An Express API authenticates project-scoped requests, rate-limits and validates them, then atomically stores the event and an outbox row in PostgreSQL. A relay publishes durable intent to BullMQ, and independent workers send SSRF-checked, HMAC-signed requests with stable event IDs and unique delivery IDs. Workers audit attempts, retry with exponential full jitter, renew Redis leases, protect unhealthy hosts with a circuit breaker, and move exhausted events to a guarded, replayable DLQ. Readiness and separate API/worker Prometheus endpoints support operations. Its semantics remain at-least-once, so receivers must process the stable event ID idempotently.”
 
 ## 18.2 Two-minute architecture answer
 
-> “I split the system into an ingestion plane and a delivery plane. The ingestion API returns 202 after validation, PostgreSQL persistence, and BullMQ enqueue, so it does not wait on an unreliable subscriber. The queue absorbs traffic bursts and workers scale independently. Each worker loads authoritative state by webhook ID, takes a Redis token lock for the logical attempt, checks a host-scoped distributed circuit breaker, attaches HMAC signatures, and sends a 10-second-bounded HTTP POST. It records every actual attempt in PostgreSQL. Failures are retried with capped exponential full jitter; after the configured budget the event is marked dead and exposed through DLQ APIs/dashboard for replay. Redis also implements a 60-second sliding-window ingestion limiter, while Prometheus exposes counters and latency buckets. I would describe the guarantee as at-least-once, not exactly-once, and the current lock as a single-Redis lease rather than strict Redlock. For production I would add a transactional outbox, stable event idempotency keys, SSRF controls, scoped credentials, atomic half-open probes, dedicated worker processes, and centralized metrics.”
+> “I split the system into an ingestion plane and a delivery plane. The ingestion API returns 202 after destination validation and a single PostgreSQL transaction containing the webhook plus outbox row; it does not depend on immediate Redis publication or wait on the subscriber. A relay publishes due outbox rows to BullMQ with stable job IDs, so Redis outages are recoverable. Each worker loads authoritative state, takes and renews a single-Redis token lease, conditionally claims the attempt in PostgreSQL, checks a host-scoped circuit breaker, revalidates the destination, rejects redirects, attaches HMAC plus stable event and unique delivery IDs, and sends a 10-second-bounded POST. It persists every execution audit. Failures schedule state and a new outbox row transactionally; exhaustion produces a DLQ outbox event, and only dead events can be replayed. Project-scoped keys filter operator APIs, readiness checks DB/Redis, and API/worker processes expose separate metrics. The guarantee is at-least-once, not exactly-once. Remaining production work includes secret encryption, a session-authenticated UI, retry classification, atomic half-open probes, egress enforcement, retention, and centralized metric discovery.”
 
 ## 18.3 STAR story without invented numbers
 
@@ -1359,7 +1376,7 @@ flowchart LR
 
 ## 18.4 Design decisions to defend
 
-**Why PostgreSQL and Redis?** PostgreSQL is authoritative relational/audit storage; Redis is fast ephemeral/shared coordination and BullMQ infrastructure. Different workload strengths justify two systems, but create a dual-write problem solved by an outbox in production.
+**Why PostgreSQL and Redis?** PostgreSQL is authoritative relational/audit storage; Redis is fast shared coordination and BullMQ infrastructure. Their boundary is handled by the implemented transactional outbox: PostgreSQL durably records intent and a relay publishes it idempotently to Redis.
 
 **Why full jitter?** Exponential delay reduces pressure; randomness prevents synchronized retries from becoming another outage wave.
 
@@ -1379,11 +1396,11 @@ flowchart LR
 
 ## Q2. What happens if Redis is down during ingestion?
 
-Rate limiting fails open, but later queue insertion fails. The controller returns `500`; because DB insertion happens first, a pending row may remain. An outbox would make this recoverable.
+The bounded rate limiter fails open. The API can still commit the webhook and pending outbox row and return `202`; readiness returns `503` while Redis is unavailable. When Redis recovers, the relay publishes the pending row. PostgreSQL must still be available for durable acceptance.
 
 ## Q3. What happens if PostgreSQL is down?
 
-Endpoint lookup or webhook insert fails, so nothing is queued and API returns `500`.
+Destination validation may complete, but endpoint lookup or the webhook/outbox transaction fails, so no event is accepted and the API returns `500`. Readiness also returns `503`.
 
 ## Q4. Can BullMQ deliver a job twice?
 
@@ -1419,11 +1436,11 @@ Operational APIs query PostgreSQL rows with status `dead`. A BullMQ DLQ also exi
 
 ## Q12. How would you support multiple tenants?
 
-Tenant-scoped hashed API keys/roles, tenant ID on all rows and queue metadata, unique endpoint constraints, per-tenant quotas, authorization filters, encryption boundaries, and noisy-neighbor controls.
+ReHook already maps `x-project-id` to a configured project key and scopes webhook/endpoint/DLQ reads and writes by project. To make that production-grade, store hashed/revocable credentials, add users/roles, enforce tenant context at every database boundary, add unique tenant endpoint constraints, quotas, encryption boundaries, and noisy-neighbor controls.
 
 ## Q13. How would you avoid SSRF?
 
-Require HTTPS; validate hostname; resolve DNS and reject loopback/private/link-local/metadata ranges; revalidate after redirects; disable or strictly limit redirects; use an egress proxy/allowlist and network policy.
+The implementation accepts only HTTP(S), rejects embedded credentials, resolves DNS, blocks non-public address classes in production, repeats validation before delivery, and rejects redirects. For stronger defense against DNS rebinding and configuration mistakes, enforce outbound network policy or an egress proxy and optionally require HTTPS/tenant allowlists.
 
 ## Q14. How do you know the receiver processed an event?
 
@@ -1435,11 +1452,11 @@ Kill a worker before send, during send, after receiver commit but before DB upda
 
 ## Q16. Why is `nextAttemptAt` not enough to schedule retries?
 
-It is a database timestamp. Current scheduling is actually performed by BullMQ’s delayed job. The field is informational for UI/audit unless a polling scheduler consumes it.
+It is the webhook's operator-facing schedule timestamp, not executable work by itself. The transaction also creates an outbox row with the same `availableAt`; the relay polls that row and publishes the BullMQ job when due. Keeping the state timestamp and publication intent in one transaction prevents a displayed retry with no durable scheduling record.
 
 ## Q17. Is the health endpoint readiness?
 
-No. It returns static healthy JSON without checking PostgreSQL or Redis. It is liveness-like, not dependency readiness.
+`GET /api/health` is intentionally liveness-only. `GET /api/ready` checks PostgreSQL plus a Redis ping bounded to 500 ms and returns `503` when a dependency is unavailable.
 
 ## Q18. What would you alert on?
 
@@ -1463,14 +1480,14 @@ Set breakpoints/logs in this order:
 2. auth middleware;
 3. rate limiter;
 4. controller;
-5. service DB insert;
-6. queue add;
+5. service URL validation and DB transaction;
+6. outbox relay and queue publication;
 7. worker DB read;
-8. lock;
+8. lock renewal and conditional claim;
 9. circuit;
-10. HMAC;
-11. fetch;
-12. audit/status branch.
+10. identity headers and HMAC;
+11. pre-send URL revalidation and fetch;
+12. audit plus transactional retry/DLQ outbox branch.
 
 For every step answer: input, output, state changed, failure behavior, and why it belongs in that layer.
 
@@ -1478,20 +1495,22 @@ For every step answer: input, output, state changed, failure behavior, and why i
 
 Run success, `500`, `429`, random failure, receiver-down, Redis-down, and worker-kill scenarios. Write down state transitions and whether the caller, worker, DB, queue, and receiver agree.
 
-## Phase 4 — implement learning improvements
+## Phase 4 — understand completed hardening, then extend it
 
-Good exercises, in order:
+First be able to explain the implemented improvements: transactional outbox recovery, initial delay persistence, stable event versus delivery identity, conditional replay, project scoping, SSRF checks, renewable leases, separate worker metrics, readiness, graceful shutdown, and migrations.
 
-1. persist/use `initial_delay_ms`;
-2. add stable `X-ReHook-Event-ID`;
-3. cryptographically verify mock-receiver signatures;
-4. classify retryable status codes and honor `Retry-After`;
-5. enforce `dead -> pending` replay transactionally;
-6. add queue-depth and end-to-end latency metrics;
-7. separate API and worker entrypoints;
-8. implement an outbox relay;
-9. add SSRF defenses;
-10. implement atomic half-open probe ownership.
+Good remaining exercises, in order:
+
+1. cryptographically verify mock-receiver signatures against exact raw bytes;
+2. classify retryable status codes and honor `Retry-After`;
+3. implement atomic half-open probe ownership;
+4. add end-to-end queue-age, DLQ-age, and replay-result metrics;
+5. encrypt endpoint secrets and return them only at creation/rotation;
+6. replace the browser-visible key with session authentication/BFF;
+7. add secret-rotation finalization and credential revocation;
+8. add cursor pagination and payload/attempt retention;
+9. enforce outbound network policy/egress proxy beyond application SSRF checks;
+10. load- and chaos-test multiple API/worker replicas with documented SLOs.
 
 ## Phase 5 — mock interview checklist
 
@@ -1504,7 +1523,7 @@ Without notes, draw:
 - retry formula and example;
 - HMAC rotation timeline;
 - at-least-once duplicate scenario;
-- outbox improvement.
+- transactional outbox and its remaining crash/idempotency edge case.
 
 Then answer:
 

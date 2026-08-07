@@ -45,3 +45,15 @@ export async function releaseLock(
   const result = await redis.eval(luaScript, 1, lockKey, token);
   return result === 1;
 }
+
+export async function extendLock(redis: Redis, lockKey: string, token: string, ttlMs: number): Promise<boolean> {
+  const luaScript = `
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+      return redis.call("pexpire", KEYS[1], ARGV[2])
+    else
+      return 0
+    end
+  `;
+  const result = await redis.eval(luaScript, 1, lockKey, token, ttlMs);
+  return result === 1;
+}

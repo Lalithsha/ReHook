@@ -9,6 +9,7 @@
     "build": "tsc --noEmit",
     "db:generate": "prisma generate --schema=prisma/schema.prisma",
     "db:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema=prisma/schema.prisma",
     "db:push": "prisma db push --schema=prisma/schema.prisma",
     "mock:receiver": "bun src/scripts/mockReceiver.ts",
     "benchmark": "bun src/scripts/benchmark.ts",

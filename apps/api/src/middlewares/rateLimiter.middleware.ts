@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { redisConnection } from '../configs/redis.config.js';
 import { Redis } from 'ioredis';
+import { config } from '../configs/env.config.js';
 
 interface RateLimiterOptions {
   windowSizeSeconds?: number;
@@ -28,7 +29,13 @@ export function createRateLimiter(options: RateLimiterOptions = {}, client: Redi
       multi.zcard(key);
       multi.expire(key, windowSizeSeconds);
 
-      const results = await multi.exec();
+      const results = await Promise.race([
+        multi.exec(),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error('Rate limiter Redis timeout')), config.rateLimitRedisTimeoutMs);
+          timer.unref();
+        }),
+      ]);
       const requestCount = (results?.[2]?.[1] as number) || 1;
 
       res.setHeader('X-RateLimit-Limit', maxRequests);

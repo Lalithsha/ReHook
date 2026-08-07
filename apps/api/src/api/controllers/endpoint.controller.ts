@@ -18,7 +18,8 @@ export class EndpointController {
         return;
       }
 
-      const endpoint = await EndpointService.createEndpoint(parseResult.data);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const endpoint = await EndpointService.createEndpoint({ ...parseResult.data, project_id: projectId });
       res.status(201).json({
         message: 'Webhook endpoint registered successfully',
         endpoint: {
@@ -52,7 +53,8 @@ export class EndpointController {
         return;
       }
 
-      const endpoint = await EndpointService.rotateSecret(id, parseResult.data.new_secret);
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
+      const endpoint = await EndpointService.rotateSecret(id, projectId, parseResult.data.new_secret);
       if (!endpoint) {
         res.status(404).json({ error: 'Not Found', message: 'Endpoint not found' });
         return;
@@ -79,7 +81,7 @@ export class EndpointController {
    */
   static async getEndpoints(req: Request, res: Response): Promise<void> {
     try {
-      const projectId = (req.query.project_id as string) || 'default';
+      const projectId = (req as Request & { projectId?: string }).projectId || 'default';
       const endpoints = await EndpointService.getEndpointsByProject(projectId);
       res.json({
         project_id: projectId,

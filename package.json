@@ -8,6 +8,7 @@
     "test:api": "bun --cwd apps/api test",
     "db:generate": "bun --cwd apps/api db:generate",
     "db:migrate": "bun --cwd apps/api db:migrate",
+    "db:migrate:deploy": "bun --cwd apps/api db:migrate:deploy",
     "db:push": "bun --cwd apps/api db:push",
     "mock:receiver": "bun --cwd apps/api mock:receiver",
     "benchmark": "bun --cwd apps/api benchmark",
