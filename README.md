@@ -23,6 +23,49 @@
 
 ---
 
+## 🎬 Product Demos & Walkthroughs
+
+### 📺 Full Product Demo (2m 18s End-to-End Walkthrough)
+
+> **Complete walkthrough of real ReHook infrastructure:** Ingestion, HTTP 500 failure simulation, exponential randomized jitter retries, DLQ inspection & single replay, zero-downtime dual-secret rotation, and 6-event outage circuit breaking.
+
+<p align="center">
+  <a href="demo-output/rehook-full-demo.mp4" title="Click to watch the Full ReHook Product Demo (2m 18s)">
+    <img src="demo-output/rehook-full-demo.jpg" alt="ReHook Full Product Demo (2m 18s)" width="100%" style="border-radius: 8px;" />
+  </a>
+  <br>
+  <sub>▶️ <b><a href="demo-output/rehook-full-demo.mp4">Watch Full Demo Video (<code>demo-output/rehook-full-demo.mp4</code>)</a></b> &mdash; Captioned end-to-end walkthrough captured from running ReHook UI & API.</sub>
+</p>
+
+<details>
+  <summary><b>📑 Video Chapters (2:18)</b></summary>
+
+  - **`00:00`** — Opening & Architecture Context
+  - **`00:06`** — Dashboard & Endpoint Registration
+  - **`00:17`** — Webhook Dispatch & Signed Delivery (HMAC-SHA256)
+  - **`00:42`** — Downstream Failure (500), Automatic Retries & Attempt Budget
+  - **`01:07`** — Dead-Letter Queue (DLQ) Inspection & Manual Replay Recovery
+  - **`01:25`** — Zero-Downtime Secret Rotation (`v1` / `v2` Verification)
+  - **`01:44`** — Outage Simulation & Circuit Breaker `OPEN` Suppression
+  - **`01:57`** — Circuit Cooldown, Batch Replay & Final Event Deliveries
+  - **`02:12`** — Summary & GitHub Repository Link
+
+</details>
+
+<br>
+
+### ⚡ Quick Architecture Tour (20s Showcase)
+
+<p align="center">
+  <a href="brag-output/brag.mp4" title="Click to watch the ReHook 20-second product showcase">
+    <img src="brag-output/brag.jpg" alt="ReHook Architecture & Video Showcase" width="100%" style="border-radius: 8px;" />
+  </a>
+  <br>
+  <sub>▶️ <b><a href="brag-output/brag.mp4">Watch 20s Showcase Video (<code>brag-output/brag.mp4</code>)</a></b> &mdash; 769 req/s ingestion benchmark, Redis circuit breaker states (CLOSED/OPEN/HALF-OPEN), and zero-loss dispatching.</sub>
+</p>
+
+---
+
 ## ⚡ Executive Summary & High-Signal Highlights
 
 - 🔒 **Distributed Redlock Concurrency Protection:** Atomic Redis locks (`acquireLock`/`releaseLock` with Lua scripts) guarantee zero duplicate HTTP deliveries across horizontal worker processes.
