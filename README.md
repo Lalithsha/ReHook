@@ -34,7 +34,7 @@
     <img src="demo-output/rehook-full-demo.jpg" alt="ReHook Full Product Demo (2m 18s)" width="100%" style="border-radius: 8px;" />
   </a>
   <br>
-  <sub>▶️ <b><a href="demo-output/rehook-full-demo.mp4">Watch Full Demo Video (<code>demo-output/rehook-full-demo.mp4</code>)</a></b> &mdash; Captioned end-to-end walkthrough captured from running ReHook UI & API.</sub>
+  <sub>▶️ <b><a href="demo-output/rehook-full-demo.mp4">Watch Full Demo Video</a></b> &mdash; Captioned end-to-end walkthrough captured from running ReHook UI & API.</sub>
 </p>
 
 <details>
@@ -61,7 +61,7 @@
     <img src="brag-output/brag.jpg" alt="ReHook Architecture & Video Showcase" width="100%" style="border-radius: 8px;" />
   </a>
   <br>
-  <sub>▶️ <b><a href="brag-output/brag.mp4">Watch 20s Showcase Video (<code>brag-output/brag.mp4</code>)</a></b> &mdash; 769 req/s ingestion benchmark, Redis circuit breaker states (CLOSED/OPEN/HALF-OPEN), and zero-loss dispatching.</sub>
+  <sub>▶️ <b><a href="brag-output/brag.mp4">Watch 20s Showcase Video</a></b> &mdash; 769 req/s ingestion benchmark, Redis circuit breaker states (CLOSED/OPEN/HALF-OPEN), and zero-loss dispatching.</sub>
 </p>
 
 ---
