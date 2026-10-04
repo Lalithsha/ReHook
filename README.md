@@ -29,13 +29,9 @@
 
 > **Complete walkthrough of real ReHook infrastructure:** Ingestion, HTTP 500 failure simulation, exponential randomized jitter retries, DLQ inspection & single replay, zero-downtime dual-secret rotation, and 6-event outage circuit breaking.
 
-<p align="center">
-  <a href="demo-output/rehook-full-demo.mp4" title="Click to watch the Full ReHook Product Demo (2m 18s)">
-    <img src="demo-output/rehook-full-demo.jpg" alt="ReHook Full Product Demo (2m 18s)" width="100%" style="border-radius: 8px;" />
-  </a>
-  <br>
-  <sub>▶️ <b><a href="demo-output/rehook-full-demo.mp4">Watch Full Demo Video</a></b> &mdash; Captioned end-to-end walkthrough captured from running ReHook UI & API.</sub>
-</p>
+https://github.com/user-attachments/assets/f255861a-30c6-4d8f-8b21-5ae64a4a32c9
+
+[▶️ Watch Full Demo Video](https://github.com/user-attachments/assets/f255861a-30c6-4d8f-8b21-5ae64a4a32c9) — Captioned end-to-end walkthrough captured from running ReHook UI & API.
 
 <details>
   <summary><b>📑 Video Chapters (2:18)</b></summary>
@@ -56,13 +52,9 @@
 
 ### ⚡ Quick Architecture Tour (20s Showcase)
 
-<p align="center">
-  <a href="brag-output/brag.mp4" title="Click to watch the ReHook 20-second product showcase">
-    <img src="brag-output/brag.jpg" alt="ReHook Architecture & Video Showcase" width="100%" style="border-radius: 8px;" />
-  </a>
-  <br>
-  <sub>▶️ <b><a href="brag-output/brag.mp4">Watch 20s Showcase Video</a></b> &mdash; 769 req/s ingestion benchmark, Redis circuit breaker states (CLOSED/OPEN/HALF-OPEN), and zero-loss dispatching.</sub>
-</p>
+https://github.com/user-attachments/assets/4c3fcadd-c41a-4be5-a632-5642fc8f2ac6
+
+[▶️ Watch 20s Showcase Video](https://github.com/user-attachments/assets/4c3fcadd-c41a-4be5-a632-5642fc8f2ac6) — 769 req/s ingestion benchmark, Redis circuit breaker states (CLOSED/OPEN/HALF-OPEN), and zero-loss dispatching.
 
 ---
 
