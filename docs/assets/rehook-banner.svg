@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="768" height="216" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">ReHook — Keep business events moving.</title>
+  <desc id="desc">A webhook delivery platform with automatic retries, recovery, and signed delivery. Navy banner with a mint loop symbol.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0a1725"/><stop offset="1" stop-color="#15263c"/></linearGradient>
+    <linearGradient id="accent" x2="1" y2="1"><stop stop-color="#78e7cf"/><stop offset="1" stop-color="#77b6ff"/></linearGradient>
+  </defs>
+  <rect width="1280" height="360" rx="24" fill="url(#bg)"/>
+  <path d="M0 359H1280" stroke="#78e7cf" stroke-width="4"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="56" y="54" fill="#78e7cf" font-size="14" font-weight="700" letter-spacing="3">BACKEND ENGINEERING · FULL STACK PRODUCT</text>
+    <text x="50" y="159" fill="#f4f8fc" font-size="94" font-weight="800" letter-spacing="-4">ReHook<tspan fill="#78e7cf">.</tspan></text>
+    <text x="56" y="217" fill="#f4f8fc" font-size="35" font-weight="700">Keep business events moving.</text>
+    <text x="56" y="254" fill="#b9c9d9" font-size="20">Automatic retries. Visible failures. A path to recovery.</text>
+    <g font-size="13" font-weight="700" letter-spacing="1">
+      <rect x="56" y="287" width="122" height="32" rx="16" fill="#20354a"/>
+      <text x="76" y="308" fill="#d9e6f2">TYPESCRIPT</text>
+      <rect x="190" y="287" width="98" height="32" rx="16" fill="#20354a"/>
+      <text x="210" y="308" fill="#d9e6f2">BULLMQ</text>
+      <rect x="300" y="287" width="146" height="32" rx="16" fill="#20354a"/>
+      <text x="320" y="308" fill="#d9e6f2">POSTGRESQL</text>
+      <rect x="458" y="287" width="108" height="32" rx="16" fill="#20354a"/>
+      <text x="478" y="308" fill="#d9e6f2">NEXT.JS</text>
+    </g>
+  </g>
+  <circle cx="1080" cy="180" r="130" fill="#78e7cf" opacity=".035"/>
+  <circle cx="1080" cy="180" r="108" fill="none" stroke="#335269" stroke-width="1"/>
+  <circle cx="1080" cy="180" r="151" fill="none" stroke="#335269" stroke-width="1" opacity=".5"/>
+  <g fill="none" stroke="url(#accent)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1150 154A77 77 0 0 0 1004 174M1004 174L1006 139M1004 174L1038 165"/>
+    <path d="M1010 206A77 77 0 0 0 1156 186M1156 186L1154 221M1156 186L1122 195"/>
+  </g>
+  <circle cx="1080" cy="180" r="10" fill="#78e7cf"/>
+</svg>

@@ -1,0 +1,56 @@
+{
+  "context": "Recorded local demonstration, September 27, 2026; not a production SLA.",
+  "final_status": {
+    "total_events": 9,
+    "delivered": 9,
+    "dead": 0
+  },
+  "circuit_breaker_event": {
+    "webhook_id": "3f3111a1-3d24-41ce-b863-5210967827a0",
+    "total_attempts": 2,
+    "attempts": [
+      {
+        "id": "5f993067-3237-4249-99a3-987a5f5a05f9",
+        "deliveryId": "2b794908-e384-4d22-b608-c0be4d1e35d8",
+        "webhookId": "3f3111a1-3d24-41ce-b863-5210967827a0",
+        "attemptNumber": 1,
+        "statusCode": null,
+        "responseBody": null,
+        "responseTimeMs": null,
+        "errorMessage": "Circuit breaker is OPEN for target host",
+        "executionStatus": "circuit_open",
+        "createdAt": "2026-09-27T17:36:50.522Z"
+      },
+      {
+        "id": "14c26f58-aedb-46a0-a372-374ba18500a0",
+        "deliveryId": "680e9c41-51e5-4187-8410-8363a34cd68b",
+        "webhookId": "3f3111a1-3d24-41ce-b863-5210967827a0",
+        "attemptNumber": 1,
+        "statusCode": 200,
+        "responseBody": "{\"receiver\": \"ReHook local demo\", \"http_status\": 200, \"event_id\": \"3f3111a1-3d24-41ce-b863-5210967827a0\", \"signature_verification\": {\"v1\": true, \"v2\": true}, \"mode\": \"healthy\"}",
+        "responseTimeMs": 44,
+        "errorMessage": null,
+        "executionStatus": "success",
+        "createdAt": "2026-09-27T17:38:04.245Z"
+      }
+    ]
+  },
+  "dual_signature_event": {
+    "webhook_id": "41c7d554-69e3-4628-b3bd-9cbbdde7158c",
+    "total_attempts": 1,
+    "attempts": [
+      {
+        "id": "90b7cf65-08cc-4494-bea6-6b38e4ddeee2",
+        "deliveryId": "d950d681-aa4b-44ef-94e0-90731f91ecbc",
+        "webhookId": "41c7d554-69e3-4628-b3bd-9cbbdde7158c",
+        "attemptNumber": 1,
+        "statusCode": 200,
+        "responseBody": "{\"receiver\": \"ReHook local demo\", \"http_status\": 200, \"event_id\": \"41c7d554-69e3-4628-b3bd-9cbbdde7158c\", \"signature_verification\": {\"v1\": true, \"v2\": true}, \"mode\": \"healthy\"}",
+        "responseTimeMs": 36,
+        "errorMessage": null,
+        "executionStatus": "success",
+        "createdAt": "2026-09-27T17:36:10.961Z"
+      }
+    ]
+  }
+}

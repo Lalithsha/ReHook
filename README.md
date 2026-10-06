@@ -1,264 +1,253 @@
-# 🔁 ReHook: Enterprise Webhook Delivery Engine
-
-<p align="left">
-  <a href="https://github.com/Lalithsha/ReHook/actions/workflows/ci.yml">
-    <img src="https://github.com/Lalithsha/ReHook/actions/workflows/ci.yml/badge.svg" alt="CI Pipeline Status">
-  </a>
-  <img src="https://img.shields.io/badge/Tests-32%20passing-brightgreen?style=for-the-badge" alt="32 Passing Tests">
-  <img src="https://img.shields.io/badge/Throughput-769%20req%2Fsec-blue?style=for-the-badge" alt="769 req/sec Throughput">
-  <img src="https://img.shields.io/badge/Bun-1.3-black?style=for-the-badge&logo=bun&logoColor=white" alt="Bun">
-  <img src="https://img.shields.io/badge/TypeScript-5.8-blue?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Express-4.21-green?style=for-the-badge&logo=express&logoColor=white" alt="Express">
-  <img src="https://img.shields.io/badge/Prisma-6.19-indigo?style=for-the-badge&logo=prisma&logoColor=white" alt="Prisma">
-  <img src="https://img.shields.io/badge/BullMQ-5.41-red?style=for-the-badge&logo=redis&logoColor=white" alt="BullMQ">
-  <img src="https://img.shields.io/badge/PostgreSQL-16-blue?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL">
+<p align="center">
+  <img src="docs/assets/rehook-banner.svg" alt="ReHook — Keep business events moving. Automatic retries, visible failures, and a path to recovery." width="100%" />
 </p>
 
-**ReHook** is an enterprise-grade, high-throughput, fault-tolerant **Webhook Delivery Engine**. Built for scale, it handles zero-loss asynchronous event dispatching, atomic **distributed Redlock execution protection**, automatic retries with **exponential randomized jitter backoff**, **distributed Redis circuit breaking**, **zero-downtime secret rotation**, quota rate limiting, **dead-letter queue (DLQ)** management, and a **Next.js operator dashboard**.
+# ReHook · Webhook delivery & recovery
 
-> 📘 **Master System Handbook:** See [REHOOK_SYSTEM_HANDBOOK.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/REHOOK_SYSTEM_HANDBOOK.md) for the single-source-of-truth technical handbook, schema models, and design trade-offs.  
-> 📊 **Published Performance Report:** See [BENCHMARKS.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/BENCHMARKS.md) for load testing methodologies and latency percentiles.  
-> 📖 **Production Master Blueprint:** See [PRODUCTION_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/PRODUCTION_PLAN.md) for architecture planning.  
-> 🎯 **Phase 2 Polish Plan:** See [PHASE_2_POLISH_PLAN.md](file:///Users/lalithsharma/My-Projects/ReHook/docs/PHASE_2_POLISH_PLAN.md) for roadmap progress.
+**When one service goes down, important events should still have a path forward.**
 
----
+ReHook is a backend platform and operator dashboard that sends events between applications, retries failed deliveries, and lets an operator inspect and replay events that need attention. Think of an online store sending an “order paid” notification to a fulfillment service: if the receiver is unavailable, ReHook tracks what happened and provides a way to recover.
 
-## 🎬 Product Demos & Walkthroughs
+Built with **TypeScript, Bun, Express, PostgreSQL, Redis, BullMQ, and Next.js**.
 
-### 📺 Full Product Demo (2m 18s End-to-End Walkthrough)
+[![CI](https://github.com/Lalithsha/ReHook/actions/workflows/ci.yml/badge.svg)](https://github.com/Lalithsha/ReHook/actions/workflows/ci.yml)
 
-> **Complete walkthrough of real ReHook infrastructure:** Ingestion, HTTP 500 failure simulation, exponential randomized jitter retries, DLQ inspection & single replay, zero-downtime dual-secret rotation, and 6-event outage circuit breaking.
+**[See the product](#see-the-product)** · **[Results & evidence](#results--evidence)** · **[How it works](#how-it-works)** · **[Run locally](#run-locally)** · **[Technical handbook](docs/REHOOK_SYSTEM_HANDBOOK.md)**
+
+> **Project status:** A locally runnable engineering portfolio project. The demos below play directly on GitHub; there is no hosted application to sign up for.
+
+## Why this matters
+
+A webhook is an HTTP notification from one application to another. A successful checkout, account update, or shipment can trigger one. Networks fail and receiving services go offline—so sending a request once is rarely enough.
+
+| When this happens… | ReHook provides… | Why it helps |
+| --- | --- | --- |
+| A receiver fails or times out | Automatic retries with increasing, randomized delays | Temporary outages can recover without someone resending every event |
+| An endpoint keeps failing | A shared circuit breaker that pauses outbound requests | Workers stop repeatedly calling a known failing destination |
+| The retry budget runs out | A dead-letter queue: a visible list of events needing attention | Operators can inspect the failure and replay the event after fixing the cause |
+| A signing secret needs changing | Signatures with both the existing and new key during rotation | Receivers can transition keys while continuing to verify events |
+| The database accepts an event but the queue is unavailable | A transactional outbox that retains work awaiting publication | Accepted events have a durable scheduling record in PostgreSQL |
+
+## See the product
+
+### One screen to understand delivery health
+
+The operator dashboard shows delivery status, events still in progress, and events waiting for recovery. Each event has a payload and attempt history to explain its journey.
+
+![ReHook dashboard after the recorded recovery demo: nine events delivered, no retries in flight, and no events left in the dead-letter queue.](docs/assets/delivery-dashboard.png)
+
+*Real application capture from the local demo. The nine-event result describes this recorded run.*
+
+### Watch the complete workflow · 2 min 18 sec
+
+Register a receiver → send an event → simulate failure → inspect retries → replay → rotate keys → recover from an outage.
 
 https://github.com/user-attachments/assets/f255861a-30c6-4d8f-8b21-5ae64a4a32c9
 
-[▶️ Watch Full Demo Video](https://github.com/user-attachments/assets/f255861a-30c6-4d8f-8b21-5ae64a4a32c9) — Captioned end-to-end walkthrough captured from running ReHook UI & API.
-
 <details>
-  <summary><b>📑 Video Chapters (2:18)</b></summary>
+<summary><strong>Jump to a specific capability</strong></summary>
 
-  - **`00:00`** — Opening & Architecture Context
-  - **`00:06`** — Dashboard & Endpoint Registration
-  - **`00:17`** — Webhook Dispatch & Signed Delivery (HMAC-SHA256)
-  - **`00:42`** — Downstream Failure (500), Automatic Retries & Attempt Budget
-  - **`01:07`** — Dead-Letter Queue (DLQ) Inspection & Manual Replay Recovery
-  - **`01:25`** — Zero-Downtime Secret Rotation (`v1` / `v2` Verification)
-  - **`01:44`** — Outage Simulation & Circuit Breaker `OPEN` Suppression
-  - **`01:57`** — Circuit Cooldown, Batch Replay & Final Event Deliveries
-  - **`02:12`** — Summary & GitHub Repository Link
+| Time | What to look for |
+| --- | --- |
+| 00:06 | Register a receiver and its signing secret |
+| 00:17 | Dispatch an event and inspect signed delivery |
+| 00:42 | Simulate HTTP 500 errors and observe automatic retries |
+| 01:07 | Inspect the dead-letter queue and replay a failed event |
+| 01:25 | Rotate a secret and verify both signatures |
+| 01:44 | Simulate an outage and observe circuit-open suppression |
+| 01:57 | Restore the receiver and replay the outage events |
+| 02:12 | Final recap |
 
 </details>
 
-<br>
+<details>
+<summary><strong>Short on time? Watch the 20-second architecture showcase</strong></summary>
 
-### ⚡ Quick Architecture Tour (20s Showcase)
+A brief introduction to the delivery engine, local benchmark, and resilience features. Measurement context is explained below.
 
 https://github.com/user-attachments/assets/4c3fcadd-c41a-4be5-a632-5642fc8f2ac6
 
-[▶️ Watch 20s Showcase Video](https://github.com/user-attachments/assets/4c3fcadd-c41a-4be5-a632-5642fc8f2ac6) — 769 req/s ingestion benchmark, Redis circuit breaker states (CLOSED/OPEN/HALF-OPEN), and zero-loss dispatching.
+</details>
 
----
+## Results & evidence
 
-## ⚡ Executive Summary & High-Signal Highlights
+The impact demonstrated here is **recoverability, visibility, and controlled delivery under failure**. These are local engineering results, not customer adoption or production service guarantees.
 
-- 🔒 **Distributed Redlock Concurrency Protection:** Atomic Redis locks (`acquireLock`/`releaseLock` with Lua scripts) guarantee zero duplicate HTTP deliveries across horizontal worker processes.
-- 🚀 **Sub-15ms Ingestion Latency:** Fast-path REST API gateway enqueues jobs directly into BullMQ without waiting for external receiver responses.
-- 🛡️ **Distributed Redis Circuit Breaker:** 3-State machine (`CLOSED`, `OPEN`, `HALF-OPEN`) stored atomically in Redis to prevent hammering failing target hosts (95% traffic reduction during outages).
-- 🎲 **Exponential Backoff with Full Jitter:** Prevents thundering herd spikes when recovering from downstream subscriber outages.
-- 🔐 **Zero-Downtime Secret Rotation:** HMAC-SHA256 signature generator supports dual-signature headers (`v1` and `v2` keys) during key updates.
-- ☠️ **DLQ & Manual Replay Engine:** Persistent Dead-Letter Queue for exhausted retries with manual and programmatic single/bulk replay APIs.
-- ⚡ **Powered by Bun:** Ultra-fast TypeScript execution, dependency resolution, and native test runner (32 passing unit, integration, and concurrency tests).
+| Achievement | Evidence | What it establishes |
+| --- | --- | --- |
+| **9 of 9 demo events delivered; 0 left dead** | [Recorded demo evidence](docs/evidence/recorded-demo.json) and dashboard above | Failed events were inspectable and recovered through replay after the receiver returned |
+| **Both signing keys verified successfully** | [Receiver response](docs/evidence/recorded-demo.json) reports `v1: true`, `v2: true`, HTTP 200 | Dual-key signing worked for a newly submitted event during rotation |
+| **An open circuit suppressed an HTTP call** | [Attempt history](docs/evidence/recorded-demo.json) records `circuit_open` with no HTTP status, followed by HTTP 200 after recovery | The recorded outage exercised request suppression and recovery |
+| **769 accepted requests/sec in a local burst** | [Published benchmark](docs/BENCHMARKS.md): 1,000 requests, concurrency 50, 1.30 sec; all returned success | Historical API ingestion performance on the documented local environment |
+| **95 of 100 simulated checks blocked** | [Circuit-breaker exercise](load-tests/run-cb-benchmark.ts): record five failures, then check 95 more decisions | State-based suppression in a Redis-backed simulation |
 
----
+**Measurement context:** The throughput report predates the current transactional-outbox changes and should be rerun to measure the current version. It measures API acceptance, not end-to-end delivery. The 95% circuit result comes from a simulation; that script does not send 100 real HTTP requests. [Benchmark methodology and reported latency](docs/BENCHMARKS.md).
 
-## 🏗️ System Architecture & Data Flow
+## Built for the moments that go wrong
+
+### Failures stay explainable
+
+A failed event retains its original payload and attempt history. The operator can see the HTTP response, elapsed time, and delivery identifier, then replay a dead event after addressing the underlying problem.
+
+![Actual ReHook attempt inspector showing a dead payment.failed event, three exhausted attempts, an HTTP 500 response, and the replay control.](docs/assets/failed-delivery-inspection.png)
+
+*In the demo, a three-attempt budget was exhausted before the event was replayed successfully.*
+
+<details>
+<summary><strong>See proof of signing-key rotation</strong></summary>
+
+![Actual ReHook attempt inspector showing HTTP 200 and a receiver response that verifies both v1 and v2 signatures.](docs/assets/signature-rotation.png)
+
+The receiver confirmed both HMAC-SHA256 signatures on a new event after rotation. The overlap lets receivers adopt the new key while the previous key remains available.
+
+</details>
+
+## How it works
+
+**Accept and store first. Deliver in the background. Keep a record of every attempt.**
 
 ```mermaid
-flowchart TD
-    subgraph Client Application
-        A[Upstream Application / Service]
-    end
-
-    subgraph API Layer [Express + Bun API Gateway]
-        B[API Key Auth & Sliding Window Rate Limiter]
-        C[Zod Request Validator & Ingestion Controller]
-    end
-
-    subgraph Storage & Queue [Persistence Layer]
-        DB[(PostgreSQL + Prisma ORM)]
-        Q[Redis / BullMQ Delivery Queue]
-        DLQ_Q[Redis BullMQ Dead Letter Queue]
-    end
-
-    subgraph Worker Pool [Distributed ReHook Workers]
-        W1[Delivery Worker Instance]
-        LOCK{Atomic Redlock Check}
-        CB{Redis Circuit Breaker}
-        SIG[HMAC-SHA256 Signer]
-    end
-
-    subgraph External Receivers
-        REC[Target Webhook Endpoint URL]
-    end
-
-    subgraph Monitoring & Operator UI
-        PROM[Prometheus Metrics Endpoint /api/v1/metrics]
-        DASH[Next.js Operator Dashboard - apps/web]
-    end
-
-    A -->|POST /api/v1/webhooks| B
-    B -->|Authorized & Under Limit| C
-    C -->|Persist Metadata| DB
-    C -->|Async Push Job < 15ms| Q
-    
-    Q -->|Consume Job| W1
-    W1 -->|Acquire Lock lock:webhook:id:attempt| LOCK
-    LOCK -->|Lock Acquired| CB
-    LOCK -->|Lock Active Elsewhere| W1
-    
-    CB -->|State: CLOSED / HALF-OPEN| SIG
-    CB -->|State: OPEN| W1
-    W1 -->|Skip HTTP & Re-queue w/ Backoff| Q
-    
-    SIG -->|Attach X-ReHook-Signature Header| REC
-    REC -->|2xx Success| W1
-    REC -->|5xx / Timeout / Network Err| W1
-    
-    W1 -->|Log Attempt Audit| DB
-    W1 -->|Attempts >= MaxAttempts| DLQ_Q
-    
-    DLQ_Q -->|GET /dlq & Replay| DASH
-    W1 -->|Record Telemetry| PROM
+flowchart LR
+    APP["Application sends an event"] --> API["API: authenticate & validate"]
+    API -->|Atomic write| TX["PostgreSQL<br/>Events + outbox records"]
+    TX --> RELAY["Outbox relay"]
+    RELAY --> Q["Redis / BullMQ"]
+    Q --> W["Worker<br/>Lock + state claim"]
+    W --> CB{"Circuit allows delivery?"}
+    CB -->|Yes| SEND["Sign payload & send HTTP"]
+    SEND --> REC["Receiving application"]
+    REC -->|Success| OK["Mark delivered"]
+    REC -->|Failure or timeout| RETRY["Schedule retry or mark dead"]
+    CB -->|No| RETRY
+    RETRY -->|State + next outbox record| TX
+    W -.-> AUDIT["PostgreSQL attempt history"]
+    AUDIT -.-> UI["Next.js dashboard<br/>Inspect & replay"]
+    UI -->|Replay dead event| API
 ```
 
----
+An **outbox** is a database record of work waiting to be sent to the queue. ReHook creates it in the same transaction as the event. The relay retries publication when Redis is available; the request path does not wait for the receiving application.
 
-## 📊 Published Performance & Resilience Benchmarks
+### Engineering decisions worth exploring
 
-ReHook includes published, reproducible performance metrics (see [`BENCHMARKS.md`](file:///Users/lalithsharma/My-Projects/ReHook/docs/BENCHMARKS.md)):
+| Decision | Implementation | Tradeoff / purpose |
+| --- | --- | --- |
+| Durable handoff | [Transactional event + outbox creation](apps/api/src/services/webhook.service.ts), [relay](apps/api/src/services/outbox.service.ts) | Adds a database write and polling delay to retain work across queue-publication failures |
+| Coordinate workers | [Redis lease with renewal and ownership-checked Lua release](apps/api/src/utils/lock.utils.ts), [conditional database claim](apps/api/src/workers/webhook.worker.ts) | Reduces concurrent duplicate execution; does not create an exactly-once guarantee |
+| Back off under failure | [Exponential jitter](apps/api/src/utils/backoff.utils.ts), [host-based circuit state](apps/api/src/services/circuitBreaker.service.ts) | Spreads retry timing and pauses failing hosts; open-circuit evaluations can consume the attempt budget |
+| Preserve event identity | [Stable event ID and separate delivery IDs](apps/api/src/workers/webhook.worker.ts) | Receivers can deduplicate business events and correlate individual attempts |
+| Authenticate and isolate | [Project-scoped API authentication](apps/api/src/middlewares/auth.middleware.ts), [target URL checks](apps/api/src/utils/targetUrl.utils.ts) | Scopes data access and restricts private/reserved targets in production mode |
+| Make failures observable | [Delivery/outbox/queue metrics](apps/api/src/services/telemetry.service.ts), [worker metrics and shutdown](apps/api/src/workers/init.ts) | Exposes operational state and drains active jobs during normal shutdown |
 
-| Metric | Measured Benchmark Value | Target / SLA | Status |
-| :--- | :--- | :--- | :--- |
-| **Sustained Ingestion Throughput** | **769 webhooks / sec** (1,000 requests in 1.30s) | > 500 req/sec | ✅ PASS |
-| **API Gateway Response Latency (p50)** | **3.28 ms** (k6) / **52 ms** (batch) | < 50 ms | ✅ PASS |
-| **API Gateway Response Latency (p95)** | **6.67 ms** (k6) / **134 ms** (batch) | < 150 ms | ✅ PASS |
-| **API Gateway Response Latency (p99)** | **152 ms** | < 250 ms | ✅ PASS |
-| **Circuit Breaker Traffic Savings** | **95% reduction** in wasted HTTP requests | > 85% | ✅ PASS |
-| **Quota Rate Limiting Safeguard** | **1,000 req/min** sliding window (returns 429) | Enforced | ✅ PASS |
+**Delivery semantics:** The design targets at-least-once delivery with a bounded attempt budget and operator replay. Receivers should deduplicate using `X-ReHook-Event-ID`; a retry can repeat an HTTP request. Multi-node Redlock and exactly-once delivery are not implemented guarantees.
+
+**Next engineering steps:** Recover events stranded in `processing` after a worker crash, add atomic ownership of half-open circuit probes, replace browser-visible development API keys with server-side authentication, and rerun failure/load tests against the current implementation. [Hardening plan](docs/PRODUCTION_HARDENING_IMPLEMENTATION_PLAN.md).
+
+## Technology & project structure
+
+| Layer | Technologies | Responsibility |
+| --- | --- | --- |
+| API | TypeScript · Bun · Express · Zod | Authentication, validation, event ingestion, inspection, replay |
+| Persistence | PostgreSQL · Prisma | Events, endpoint keys, attempt history, transactional outbox |
+| Queue & workers | Redis · BullMQ | Background delivery, scheduling, concurrency coordination |
+| Operator UI | Next.js · React · Tailwind CSS | Delivery dashboard, failure inspection, endpoint management |
+| Operations | Docker Compose · Prometheus metrics · GitHub Actions | Local environment, observability, automated checks |
+
+```text
+apps/api/       API, delivery workers, Prisma schema & migrations
+apps/web/       Operator dashboard
+packages/       Shared UI and TypeScript/ESLint configuration
+load-tests/     Native and k6 benchmark scripts
+docs/           Architecture, benchmarks, visual assets & demo evidence
+demo-output/    Recorded full product walkthrough
+brag-output/    Short architecture showcase
+```
+
+## Run locally
+
+**Prerequisites:** Docker with Docker Compose. The Compose setup runs PostgreSQL, Redis, the API, delivery workers, and the dashboard.
 
 ```bash
-# Run local performance benchmarks
-bun load-tests/run-benchmark.ts
-bun load-tests/run-cb-benchmark.ts
+git clone https://github.com/Lalithsha/ReHook.git
+cd ReHook
+docker compose up --build -d
 ```
 
----
+| Service | Local address |
+| --- | --- |
+| Operator dashboard | http://localhost:3000 |
+| API liveness / dependency readiness | http://localhost:3001/api/health · http://localhost:3001/api/ready |
+| API summary metrics | http://localhost:3001/api/v1/metrics |
+| Worker Prometheus metrics | http://localhost:9464/metrics |
 
-## 🛡️ Key Architectural Mechanics
+The Compose file includes development credentials and allows local/private receiver URLs for testing. It is configured for local development.
 
-### 1. Atomic Distributed Redlock (`lock.utils.ts`)
-To prevent duplicate webhook deliveries when multiple background worker nodes run concurrently or during worker failover pauses, ReHook acquires a Redis lock (`lock:webhook:<webhookId>:<attemptNumber>`) prior to making outbound HTTP POST requests:
-- **Acquire:** `redis.set(key, token, 'PX', ttlMs, 'NX')`
-- **Release:** Atomic Lua script verifying token ownership:
-  ```lua
-  if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("del", KEYS[1])
-  else
-    return 0
-  end
-  ```
+<details>
+<summary><strong>Try a delivery against the included mock receiver</strong></summary>
 
-### 2. Distributed Circuit Breaker (`circuitBreaker.service.ts`)
-Tracks failure rates per target host across 100+ distributed worker nodes:
-- `CLOSED` $\rightarrow$ Normal delivery.
-- `OPEN` $\rightarrow$ Target host returning 5xx; short-circuits attempts for 30s.
-- `HALF_OPEN` $\rightarrow$ Allows probe request; closes circuit on 2xx or re-opens on failure.
+With Bun installed, start the receiver on your host in a separate terminal:
 
-### 3. Zero-Downtime Secret Rotation (`crypto.utils.ts`)
-Generates dual-secret HMAC-SHA256 signatures (`X-ReHook-Signature: t=...,v1=...,v2=...`), allowing subscriber applications to update secrets without dropping a single event.
-
----
-
-## 🚀 "What I'd Do Next" (Future Production Roadmap)
-
-1. **Multi-Region Worker Edge Pools:**
-   Deploy regional delivery worker clusters (e.g. AWS `us-east-1`, `eu-west-1`, `ap-southeast-1`) close to subscriber target endpoints to eliminate cross-continental TCP handshake latency.
-
-2. **Adaptive Dynamic Rate Limiting & Target Backpressure:**
-   Parse HTTP 429 (`Retry-After`) and `RateLimit-Reset` response headers returned by subscriber receivers, dynamically adjusting per-domain worker concurrency levels.
-
-3. **Payload Encryption at Rest & Enforced Size Limits:**
-   Enforce a strict 1MB payload cap at the API Gateway and implement AES-256-GCM field-level encryption at rest in PostgreSQL for sensitive webhook payloads.
-
-4. **Automated Kubernetes / Terraform Cloud Deployment:**
-   Package ReHook into Helm charts with HPA (Horizontal Pod Autoscaling) based on BullMQ queue depth metrics (`rehook_queue_waiting_jobs > 100`).
-
----
-
-## 🔌 API Reference
-
-All endpoints (except `/api/health` and `/api/v1/metrics`) require an `x-api-key` header.
-
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/webhooks` | Register and trigger a webhook event | ✅ Yes (`x-api-key`) |
-| `GET` | `/api/v1/webhooks` | List webhooks with pagination & status filters | ✅ Yes (`x-api-key`) |
-| `GET` | `/api/v1/webhooks/:id/status` | Get real-time delivery status & attempt counts | ✅ Yes (`x-api-key`) |
-| `GET` | `/api/v1/webhooks/:id/attempts` | List complete execution attempts audit log | ✅ Yes (`x-api-key`) |
-| `GET` | `/api/v1/dlq` | List dead-lettered webhooks | ✅ Yes (`x-api-key`) |
-| `POST` | `/api/v1/dlq/:id/replay` | Manually replay a dead-lettered webhook | ✅ Yes (`x-api-key`) |
-| `POST` | `/api/v1/endpoints` | Register target endpoint with signing key | ✅ Yes (`x-api-key`) |
-| `POST` | `/api/v1/endpoints/:id/rotate` | Trigger dual-secret key rotation | ✅ Yes (`x-api-key`) |
-| `GET` | `/api/v1/metrics` | Prometheus metrics endpoint | ❌ Public |
-| `GET` | `/api/health` | Healthcheck endpoint | ❌ Public |
-
----
-
-## 🛠️ Quick Start & Local Execution
-
-### 1. Start Infrastructure via Docker Compose
-```bash
-docker compose up -d
-```
-
-### 2. Install Monorepo Dependencies
 ```bash
 bun install
+bun mock:receiver
 ```
 
-### 3. Synchronize PostgreSQL Database Schema
+Submit an event to the Dockerized API. Docker Desktop on macOS/Windows can reach the host receiver through `host.docker.internal`:
+
 ```bash
-bun db:push
+curl -X POST http://localhost:3001/api/v1/webhooks \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: super_secret_rehook_key_123' \
+  -d '{
+    "target_url": "http://host.docker.internal:4000/webhook",
+    "event_type": "order.paid",
+    "payload": {"order_id": "demo-001", "amount": 49.99},
+    "retry_config": {"max_attempts": 3, "initial_delay_ms": 1000}
+  }'
 ```
 
-### 4. Start API Gateway & Delivery Worker Engine
-```bash
-bun dev:api
-```
+The API returns **202 Accepted** with the event ID. Look for it in the dashboard; delivery happens asynchronously. To exercise failure handling, submit another event with `?mode=fail` appended to the receiver URL. On Linux, configure the Docker host gateway or use a receiver reachable from the worker container.
 
-### 5. Start Operator Dashboard UI
-```bash
-bun --cwd apps/web dev
-```
+</details>
 
----
+<details>
+<summary><strong>Run API tests with local PostgreSQL and Redis</strong></summary>
 
-## 🧪 Testing
-
-Run complete unit, integration, and concurrency stress test suite:
+With Bun installed and Compose running:
 
 ```bash
+bun install
+cp apps/api/.env.example apps/api/.env
+bun db:generate
 bun test:api
 ```
 
-```
- 32 pass
- 0 fail
- 81 expect() calls
-Ran 32 tests across 11 files. [571.00ms]
-```
+Adjust the copied environment file if your local ports or credentials differ. Prisma client generation is required after schema changes. Test files cover authentication, validation, signatures, backoff, locks, circuit breaking, and worker/API behavior. The live CI badge above links to current results.
+
+</details>
+
+## API at a glance
+
+Protected routes use `x-api-key`; project-scoped clients can also send `x-project-id`.
+
+| Capability | Routes |
+| --- | --- |
+| Send & inspect events | `POST /api/v1/webhooks` · `GET /api/v1/webhooks` |
+| Delivery status & audit history | `GET /api/v1/webhooks/:id/status` · `GET /api/v1/webhooks/:id/attempts` |
+| Inspect failed events | `GET /api/v1/dlq` · `GET /api/v1/dlq/:id` |
+| Replay one dead event | `POST /api/v1/dlq/:id/replay` |
+| Register & list receivers | `POST /api/v1/endpoints` · `GET /api/v1/endpoints` |
+| Rotate a signing secret | `POST /api/v1/endpoints/:id/rotate` |
+
+[Route definitions](apps/api/src/api/routes/webhook.routes.ts) · [Request validation](apps/api/src/api/validators/webhook.validator.ts)
+
+## Explore further
+
+- [System handbook](docs/REHOOK_SYSTEM_HANDBOOK.md) — schema, lifecycle, implementation details, and design tradeoffs.
+- [Performance report](docs/BENCHMARKS.md) — historical local results and reproduction scripts.
+- [Production hardening plan](docs/PRODUCTION_HARDENING_IMPLEMENTATION_PLAN.md) — durability, security, identity, observability, and remaining work.
+- [Demo evidence](docs/evidence/recorded-demo.json) — selected results from the recorded local run.
+- [Visual sources](docs/assets/README.md) — provenance of the real UI captures used here.
 
 ---
 
-## 📄 License
-
-[MIT License](LICENSE) © 2026 Lalith Sharma
+Built by **[Lalith Sharma](https://github.com/Lalithsha)** · Backend systems, reliability, and full stack product engineering.
