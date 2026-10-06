@@ -104,8 +104,15 @@ The receiver confirmed both HMAC-SHA256 signatures on a new event after rotation
 
 **Accept and store first. Deliver in the background. Keep a record of every attempt.**
 
+![ReHook event journey: receive and validate, store the event and outbox, queue background work, and deliver securely. Successful requests are marked delivered; failures retry and exhausted events can be inspected and replayed.](docs/assets/how-it-works.svg)
+
+**Read the numbered path first:** Receive → Store → Queue → Deliver. A successful delivery is recorded. Failures take the recovery branch: retry automatically, or inspect the dead-letter queue and replay after fixing the cause. Manual replay schedules a fresh delivery immediately.
+
+<details>
+<summary><strong>Technical architecture — components, persistence, and recovery paths</strong></summary>
+
 ```mermaid
-flowchart LR
+flowchart TD
     APP["Application sends an event"] --> API["API: authenticate & validate"]
     API -->|Atomic write| TX["PostgreSQL<br/>Events + outbox records"]
     TX --> RELAY["Outbox relay"]
@@ -122,6 +129,8 @@ flowchart LR
     AUDIT -.-> UI["Next.js dashboard<br/>Inspect & replay"]
     UI -->|Replay dead event| API
 ```
+
+</details>
 
 An **outbox** is a database record of work waiting to be sent to the queue. ReHook creates it in the same transaction as the event. The relay retries publication when Redis is available; the request path does not wait for the receiving application.
 

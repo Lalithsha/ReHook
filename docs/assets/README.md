@@ -8,3 +8,5 @@
 The screenshots come from the real ReHook UI, not generated interface mockups. Their caption bars are part of the original demo. Credentials and receiver addresses shown are disposable local demo values.
 
 The original recording is in `demo-output/rehook-full-demo.mp4`. Selected API evidence is preserved in [`../evidence/recorded-demo.json`](../evidence/recorded-demo.json).
+
+- `how-it-works.svg`: static, readable event-journey diagram derived from [`../diagrams/how-it-works.json`](../diagrams/how-it-works.json). Main steps use plain-language headings and technical subtitles; arrows show delivery and recovery paths.

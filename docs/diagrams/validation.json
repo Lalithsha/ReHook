@@ -1,0 +1,22 @@
+{
+  "diagram_type": "architecture",
+  "source": "how-it-works.json",
+  "source_sha256": "4e0a46c641d73d8e345c8e76f2538074773697da885aea6bf39ce41266e95987",
+  "readme_svg": "../assets/how-it-works.svg",
+  "readme_svg_sha256": "d5b8d07349733e21d26860e453a8096d24b3d5596936a15f2fc06e8356983c7d",
+  "layout_validation": "9/9 showcase checks; 0 errors; 0 warnings",
+  "static_visual_review": "Passed: final SVG thumbnail inspected at 1000px width. Labels, arrows, and card text visible.",
+  "standalone_html": {
+    "output": "/private/tmp/rehook-how-it-works.html",
+    "specification": {
+      "sha256": "4e0a46c641d73d8e345c8e76f2538074773697da885aea6bf39ce41266e95987",
+      "bytes": 3163
+    },
+    "artifact": {
+      "sha256": "8e73cbd763729e7d8efb144c78383aa40cd4d0411ebea48f94a8dff9d7953785",
+      "bytes": 804309
+    },
+    "browser_evidence": "failed: standalone viewer exceeded vertical viewport containment; not published or used in README"
+  },
+  "correction_rounds": 2
+}

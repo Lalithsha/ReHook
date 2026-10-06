@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How ReHook keeps events moving",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      860,
+      780
+    ]
+  },
+  "components": [
+    {
+      "id": "receive",
+      "type": "backend",
+      "label": "01 \u00b7 Receive an event",
+      "sublabel": "API \u00b7 authenticate and validate",
+      "pos": [
+        50,
+        60
+      ],
+      "size": [
+        270,
+        90
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "02 \u00b7 Store safely",
+      "sublabel": "PostgreSQL \u00b7 event + outbox",
+      "pos": [
+        430,
+        60
+      ],
+      "size": [
+        270,
+        90
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "03 \u00b7 Queue the work",
+      "sublabel": "Outbox relay \u2192 Redis / BullMQ",
+      "pos": [
+        430,
+        270
+      ],
+      "size": [
+        270,
+        90
+      ]
+    },
+    {
+      "id": "deliver",
+      "type": "backend",
+      "label": "04 \u00b7 Deliver securely",
+      "sublabel": "Worker \u00b7 circuit check + HMAC",
+      "pos": [
+        50,
+        270
+      ],
+      "size": [
+        270,
+        90
+      ]
+    },
+    {
+      "id": "success",
+      "type": "external",
+      "label": "Delivered",
+      "sublabel": "Receiver accepts \u00b7 audit retained",
+      "pos": [
+        50,
+        480
+      ],
+      "size": [
+        270,
+        90
+      ]
+    },
+    {
+      "id": "retry",
+      "type": "backend",
+      "label": "Retry with breathing room",
+      "sublabel": "Increasing, randomized delays",
+      "pos": [
+        430,
+        480
+      ],
+      "size": [
+        270,
+        90
+      ]
+    },
+    {
+      "id": "inspect",
+      "type": "frontend",
+      "label": "Inspect and replay",
+      "sublabel": "Dead-letter queue \u00b7 operator UI",
+      "pos": [
+        430,
+        650
+      ],
+      "size": [
+        270,
+        90
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "accept",
+      "from": "receive",
+      "to": "store",
+      "label": "Atomic write"
+    },
+    {
+      "id": "publish",
+      "from": "store",
+      "to": "queue",
+      "label": "Publish when due",
+      "labelDy": 24
+    },
+    {
+      "id": "consume",
+      "from": "queue",
+      "to": "deliver",
+      "label": "Background work"
+    },
+    {
+      "id": "ok",
+      "from": "deliver",
+      "to": "success",
+      "label": "HTTP success",
+      "variant": "emphasis",
+      "labelDy": 24
+    },
+    {
+      "id": "failure",
+      "from": "deliver",
+      "to": "retry",
+      "label": "Failure / circuit open"
+    },
+    {
+      "id": "again",
+      "from": "retry",
+      "to": "queue",
+      "label": "Outbox schedules retry",
+      "variant": "dashed"
+    },
+    {
+      "id": "budget",
+      "from": "retry",
+      "to": "inspect",
+      "label": "Budget exhausted",
+      "labelDy": 24,
+      "labelDx": -90
+    },
+    {
+      "id": "replay",
+      "from": "inspect",
+      "to": "retry",
+      "label": "Replay after fixing cause",
+      "variant": "dashed",
+      "labelDx": 145
+    }
+  ]
+}
