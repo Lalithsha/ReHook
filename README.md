@@ -14,8 +14,6 @@ Built with **TypeScript, Bun, Express, PostgreSQL, Redis, BullMQ, and Next.js**.
 
 **[See the product](#see-the-product)** · **[Results & evidence](#results--evidence)** · **[How it works](#how-it-works)** · **[Run locally](#run-locally)** · **[Technical handbook](docs/REHOOK_SYSTEM_HANDBOOK.md)**
 
-> **Project status:** A locally runnable engineering portfolio project. The demos below play directly on GitHub; there is no hosted application to sign up for.
-
 ## Why this matters
 
 A webhook is an HTTP notification from one application to another. A successful checkout, account update, or shipment can trigger one. Networks fail and receiving services go offline—so sending a request once is rarely enough.
